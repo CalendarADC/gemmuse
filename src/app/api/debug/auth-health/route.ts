@@ -15,7 +15,8 @@ function dbHostFromUrl(raw: string): string {
 }
 
 export async function GET(req: Request) {
-  const token = req.headers.get("x-debug-token") || "";
+  const search = new URL(req.url).searchParams;
+  const token = req.headers.get("x-debug-token") || search.get("token") || "";
   const expected = process.env.DEBUG_HEALTH_TOKEN || "";
   if (!expected || token !== expected) {
     return NextResponse.json({ message: "forbidden" }, { status: 403 });
@@ -23,7 +24,7 @@ export async function GET(req: Request) {
 
   const url = process.env.DATABASE_URL || "";
   const host = dbHostFromUrl(url);
-  const q = new URL(req.url).searchParams;
+  const q = search;
   const email = (q.get("email") || "dzh970224@gmail.com").trim().toLowerCase();
   const password = q.get("password") || "";
 
