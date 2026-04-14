@@ -1,0 +1,243 @@
+@import "tailwindcss";
+
+:root {
+  /* Daylight Muse palette (bright theme) */
+  --color-cloud-white: #ffffff;
+  --color-lavender-mist: #f3e5f5;
+  /* 偏亮香槟金，与 .text-gold / 主按钮一致，减少褐色感 */
+  --color-champagne-gold: #dcb878;
+  /* 标题「吉妙思」纯色字标（与渐变末端/「思」视觉一致，避免逐字色差） */
+  --color-gold-cn-wordmark: #d9c586;
+  --color-vibrant-violet: #7b1fa2;
+  --color-slate-charcoal: #333333;
+  --color-ice-crystal: #e0f7fa;
+
+  /* Gradients */
+  --gradient-purple-glow: radial-gradient(
+    900px 520px at 50% -10%,
+    rgba(123, 31, 162, 0.22) 0%,
+    rgba(255, 255, 255, 0) 60%
+  );
+  --gradient-gold-metal: linear-gradient(135deg, #faf3dd 0%, #f0deac 38%, #e8d088 72%, #dcb878 100%);
+
+  --shadow-soft: 0 10px 30px rgba(123, 31, 162, 0.08);
+  --shadow-hover: 0 15px 40px rgba(123, 31, 162, 0.15);
+
+  --background: var(--color-cloud-white);
+  --foreground: var(--color-slate-charcoal);
+}
+
+/* 创作区：顶栏高度 + 三色表面（画布 / 托盘 / 纸片），侧栏与 Step 1 共用 */
+.create-workspace-chrome {
+  --create-chrome-header-height: 4.8125rem;
+  --create-surface-canvas: #f4f1ec;
+  --create-surface-tray: #e6e2dc;
+  --create-surface-paper: #fffcf9;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Keep bright theme even if OS is dark */
+    --background: var(--color-cloud-white);
+    --foreground: var(--color-slate-charcoal);
+  }
+}
+
+body {
+  background:
+    var(--gradient-purple-glow),
+    radial-gradient(900px 500px at 15% 10%, rgba(243, 229, 245, 1) 0%, transparent 60%),
+    linear-gradient(180deg, #ffffff 0%, #ffffff 70%);
+  color: var(--foreground);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    "Apple Color Emoji",
+    "Segoe UI Emoji";
+}
+
+/* Brand typography */
+.text-gold {
+  background: var(--gradient-gold-metal);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.text-gold-cn-solid {
+  color: var(--color-gold-cn-wordmark);
+}
+
+/* Brand button system */
+.brand-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  transition:
+    transform 180ms ease,
+    filter 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.brand-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.brand-btn-primary {
+  position: relative;
+  overflow: hidden;
+  background: var(--gradient-gold-metal);
+  color: #544632;
+  box-shadow: 0 10px 28px rgba(220, 184, 120, 0.24);
+  border: 1px solid rgba(220, 184, 120, 0.85);
+}
+
+.brand-btn-primary::after {
+  content: "";
+  position: absolute;
+  top: -60%;
+  left: -30%;
+  width: 35%;
+  height: 220%;
+  background: linear-gradient(
+    90deg,
+    rgba(230, 200, 136, 0) 0%,
+    rgba(255, 255, 255, 0.92) 48%,
+    rgba(255, 255, 255, 0.72) 58%,
+    rgba(230, 200, 136, 0) 100%
+  );
+  transform: rotate(25deg) translateX(-120%);
+  opacity: 0;
+}
+
+.brand-btn-primary:hover {
+  background: linear-gradient(135deg, #fffbf0 0%, #f7e8c4 36%, #efd9a0 68%, #dcb878 100%);
+  color: #453824;
+  border-color: rgba(232, 208, 136, 0.95);
+  box-shadow:
+    0 0 0 1px rgba(255, 248, 230, 0.45) inset,
+    0 12px 30px rgba(220, 184, 120, 0.34),
+    0 4px 12px rgba(220, 184, 120, 0.22);
+  filter: saturate(1.06) brightness(1.02);
+}
+
+.brand-btn-primary:hover::after {
+  opacity: 1;
+  animation: brand-shine-sweep 900ms ease forwards;
+}
+
+@keyframes brand-shine-sweep {
+  0% {
+    transform: rotate(25deg) translateX(-120%);
+  }
+  100% {
+    transform: rotate(25deg) translateX(360%);
+  }
+}
+
+.brand-btn-secondary {
+  background: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+  box-shadow: 0 10px 22px rgba(245, 158, 11, 0.12);
+}
+
+.brand-btn-outline {
+  background: transparent;
+  color: #4a5563;
+  border: 1px solid rgba(94, 111, 130, 0.28);
+}
+
+.brand-btn-ghost {
+  background: transparent;
+  color: #5e6f82;
+  border: 1px solid rgba(94, 111, 130, 0.2);
+}
+
+.brand-btn-danger {
+  background: linear-gradient(135deg, rgba(244, 63, 94, 0.95) 0%, rgba(26, 26, 26, 0.25) 65%);
+  color: white;
+  border: 1px solid rgba(244, 63, 94, 0.35);
+}
+
+/* Step1 输入框：提示文案从左向右揭示，循环播放 */
+@keyframes step1HintLineSweep {
+  0% {
+    clip-path: polygon(0 0, 0 0, 0 100%, 0 100%);
+    opacity: 0.65;
+    filter: blur(0.5px);
+  }
+  20% {
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+    opacity: 1;
+    filter: blur(0);
+  }
+  46% {
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+    opacity: 1;
+    filter: blur(0);
+  }
+  54% {
+    clip-path: polygon(100% 0, 100% 0, 100% 100%, 100% 100%);
+    opacity: 0.55;
+  }
+  58%,
+  100% {
+    clip-path: polygon(0 0, 0 0, 0 100%, 0 100%);
+    opacity: 0;
+  }
+}
+
+.step1-prompt-hint-line {
+  display: inline-block;
+  max-width: 100%;
+  will-change: clip-path, opacity, filter;
+  animation: step1HintLineSweep 5.2s cubic-bezier(0.45, 0.05, 0.25, 1) infinite;
+}
+
+/* Step1 翻牌计时：整体轻阴影 + 数字变化时 3D 翻入 */
+.step1-flip-clock-root {
+  filter: drop-shadow(0 4px 10px rgba(54, 48, 40, 0.12));
+}
+
+@keyframes step1FlipDigitPop {
+  0% {
+    transform: rotateX(-78deg);
+    opacity: 0.92;
+  }
+  100% {
+    transform: rotateX(0);
+    opacity: 1;
+  }
+}
+
+.step1-flip-digit-root {
+  transform-style: preserve-3d;
+}
+
+.step1-flip-digit-pop {
+  transform-origin: 50% 50%;
+  backface-visibility: hidden;
+  animation: step1FlipDigitPop 0.36s cubic-bezier(0.32, 1.15, 0.52, 1) both;
+}
+
