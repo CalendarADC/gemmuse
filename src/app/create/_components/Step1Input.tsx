@@ -9,7 +9,9 @@ import { consumeGalleryDragPayload, GALLERY_DRAG_REF_MIME } from "@/lib/ui/galle
 import { STEP1_CIRCLE_BTN_BASE, step1CircleBtnClass } from "./createToolbarCircleButton";
 import ResolutionToggleIcon from "./ResolutionToggleIcon";
 
-const MAX_REFERENCE_FILE_BYTES = 12 * 1024 * 1024;
+const MAX_REFERENCE_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_REFERENCE_IMAGE_PAYLOAD_BYTES = 900 * 1024;
+const MAX_REFERENCE_TOTAL_PAYLOAD_BYTES = 3_200 * 1024;
 const MAX_REFERENCE_IMAGES = 5;
 
 const STEP1_PROMPT_HINT = "输入您的灵感火花，我们帮您实现";
@@ -85,6 +87,62 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(new Error("read failed"));
     reader.readAsDataURL(file);
   });
+}
+
+function estimateDataUrlBytes(dataUrl: string): number {
+  const i = dataUrl.indexOf(",");
+  if (i < 0) return 0;
+  const b64 = dataUrl.slice(i + 1);
+  return Math.floor((b64.length * 3) / 4);
+}
+
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("image decode failed"));
+    img.src = src;
+  });
+}
+
+async function compressReferenceImageDataUrl(
+  inputDataUrl: string,
+  maxBytes = MAX_REFERENCE_IMAGE_PAYLOAD_BYTES
+): Promise<string> {
+  if (estimateDataUrlBytes(inputDataUrl) <= maxBytes) return inputDataUrl;
+  const img = await loadImageElement(inputDataUrl);
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return inputDataUrl;
+
+  let width = img.naturalWidth || img.width;
+  let height = img.naturalHeight || img.height;
+  let quality = 0.88;
+  let best = inputDataUrl;
+  const maxDimension = 1900;
+  const ratio0 = width > height ? maxDimension / width : maxDimension / height;
+  if (ratio0 < 1) {
+    width = Math.max(320, Math.round(width * ratio0));
+    height = Math.max(320, Math.round(height * ratio0));
+  }
+
+  for (let pass = 0; pass < 8; pass++) {
+    canvas.width = width;
+    canvas.height = height;
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+    const out = canvas.toDataURL("image/jpeg", quality);
+    best = out;
+    const bytes = estimateDataUrlBytes(out);
+    if (bytes <= maxBytes) return out;
+    if (pass % 2 === 0) {
+      quality = Math.max(0.55, quality - 0.09);
+    } else {
+      width = Math.max(320, Math.round(width * 0.84));
+      height = Math.max(320, Math.round(height * 0.84));
+    }
+  }
+  return best;
 }
 
 function isLikelyImageFile(file: File) {
@@ -235,12 +293,21 @@ export default function Step1Input() {
       return false;
     }
     if (file.size > MAX_REFERENCE_FILE_BYTES) {
-      setUploadHint(`图片需小于 ${MAX_REFERENCE_FILE_BYTES / (1024 * 1024)}MB，请压缩后重试。`);
+      setUploadHint(`原图需小于 ${MAX_REFERENCE_FILE_BYTES / (1024 * 1024)}MB，请先缩小后重试。`);
       return false;
     }
 
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      const rawDataUrl = await readFileAsDataUrl(file);
+      const dataUrl = await compressReferenceImageDataUrl(rawDataUrl);
+      const currentBytes = useJewelryGeneratorStore
+        .getState()
+        .step1ReferenceImageDataUrls.reduce((sum, x) => sum + estimateDataUrlBytes(x), 0);
+      const incomingBytes = estimateDataUrlBytes(dataUrl);
+      if (currentBytes + incomingBytes > MAX_REFERENCE_TOTAL_PAYLOAD_BYTES) {
+        setUploadHint("参考图总大小过大，已自动压缩但仍超限。请减少张数或使用更小图片。");
+        return false;
+      }
       const ok = useJewelryGeneratorStore.getState().addStep1ReferenceImage(dataUrl);
       if (!ok) {
         setUploadHint(`最多 ${MAX_REFERENCE_IMAGES} 张参考图，请先删除一张再添加。`);
@@ -249,7 +316,7 @@ export default function Step1Input() {
       setUploadHint(null);
       return true;
     } catch {
-      setUploadHint("读取图片失败，请重试。");
+      setUploadHint("读取或压缩图片失败，请重试。");
       return false;
     }
   };

@@ -1,7 +1,9 @@
 import { revalidatePath } from "next/cache";
+import { hash } from "bcryptjs";
 
 import { requireAdminUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import ResetPasswordForm from "./ResetPasswordForm";
 
 async function updateUser(formData: FormData) {
   "use server";
@@ -42,6 +44,12 @@ async function updateUser(formData: FormData) {
       where: { id: userId },
       data: { role: "USER" },
     });
+  } else if (action === "reset_password_12345678") {
+    const passwordHash = await hash("12345678", 10);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
   }
 
   revalidatePath("/admin/users");
@@ -66,6 +74,9 @@ export default async function AdminUsersPage() {
       <h1 className="text-2xl font-semibold">用户管理后台</h1>
       <p className="mt-2 text-sm text-zinc-600">
         当前管理员：{me.email}。可审核新注册账号、启用/禁用用户及调整管理员权限。
+      </p>
+      <p className="mt-1 text-xs text-amber-700">
+        支持一键重置用户密码为 12345678（用户登录后建议尽快修改）。
       </p>
 
       <div className="mt-6 overflow-x-auto rounded-xl border border-zinc-200 bg-white">
@@ -142,6 +153,8 @@ export default async function AdminUsersPage() {
                         </form>
                       )
                     )}
+
+                    <ResetPasswordForm userId={u.id} email={u.email} action={updateUser} />
                   </div>
                 </td>
               </tr>
