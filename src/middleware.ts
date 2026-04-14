@@ -16,6 +16,7 @@ function isProtectedPath(pathname: string): boolean {
   if (pathname.startsWith("/api/generate-main")) return true;
   if (pathname.startsWith("/api/enhance")) return true;
   if (pathname.startsWith("/api/generate-copy")) return true;
+  if (pathname.startsWith("/api/tasks")) return true;
   return false;
 }
 

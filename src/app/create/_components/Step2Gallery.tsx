@@ -32,13 +32,37 @@ function IconStep1Brain({ className }: { className?: string }) {
   );
 }
 
-function downloadDataUrl(url: string, filename: string) {
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+async function downloadImage(url: string, filename: string): Promise<void> {
+  const directHref = () => {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  if (url.startsWith("data:") || url.startsWith("blob:")) {
+    directHref();
+    return;
+  }
+
+  const res = await fetch(url, { credentials: "omit" });
+  if (!res.ok) {
+    throw new Error(`download failed (${res.status})`);
+  }
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 function getDataUrlExt(url: string): string {
@@ -393,12 +417,13 @@ export default function Step2Gallery() {
                 <button
                   type="button"
                   aria-label="下载主视图"
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation();
-                    downloadDataUrl(
-                      img.url,
-                      `main_${img.id}.${getDataUrlExt(img.url)}`
-                    );
+                    try {
+                      await downloadImage(img.url, `main_${img.id}.${getDataUrlExt(img.url)}`);
+                    } catch {
+                      emitToast({ message: "下载失败：图片地址不可访问或跨域受限。", type: "error" });
+                    }
                   }}
                   className="absolute left-2 bottom-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-gray-800 ring-1 ring-gray-200 hover:bg-white"
                 >

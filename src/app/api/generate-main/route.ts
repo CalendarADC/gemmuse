@@ -32,10 +32,12 @@ import {
 } from "@/lib/ai/jewelrySoftLimits";
 import { requireApiActiveUser } from "@/lib/apiAuth";
 import { persistGeneratedImage } from "@/lib/images/persistGeneratedImage";
+import { ensureOwnedTaskId } from "@/lib/tasks/resolveTask";
 
 export const runtime = "nodejs";
 
 type Body = {
+  taskId?: string;
   prompt: string;
   count: number;
   provider: string;
@@ -67,6 +69,7 @@ export async function POST(req: Request) {
 
   const body = (await req.json().catch(() => ({}))) as Partial<Body>;
   const prompt = typeof body.prompt === "string" ? body.prompt : "";
+  const taskIdRaw = typeof body.taskId === "string" ? body.taskId : "";
   const countRaw = typeof body.count === "number" ? body.count : 2;
   const count = Math.min(5, Math.max(1, Math.floor(countRaw)));
   const provider = typeof body.provider === "string" ? body.provider : "nano-banana-pro";
@@ -102,6 +105,10 @@ export async function POST(req: Request) {
 
   if (!prompt.trim()) {
     return NextResponse.json({ message: "缺少 prompt" }, { status: 400 });
+  }
+  const taskId = await ensureOwnedTaskId(authz.user.id, taskIdRaw);
+  if (!taskId) {
+    return NextResponse.json({ message: "无效 taskId" }, { status: 400 });
   }
 
   // nano-banana-pro 软限制：在老张图像生成的采样参数中给定合理随机性/严谨性
@@ -284,6 +291,7 @@ export async function POST(req: Request) {
 
       const persisted = await persistGeneratedImage({
         userId: authz.user.id,
+        taskId,
         kind: "main",
         base64,
         debugPromptZh: userFacingExpandedPromptForThis,
@@ -291,7 +299,7 @@ export async function POST(req: Request) {
       });
 
       return {
-        id: `main_${i + 1}_${Date.now()}`,
+        id: persisted.id,
         url: persisted.url,
         createdAt: now,
         // 前端“眼睛”按钮：只显示可复刻扩写提示词（不含系统/软限制）

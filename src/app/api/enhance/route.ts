@@ -18,6 +18,7 @@ import {
 } from "@/lib/ai/jewelrySoftLimits";
 import { requireApiActiveUser } from "@/lib/apiAuth";
 import { persistGeneratedImage } from "@/lib/images/persistGeneratedImage";
+import { ensureOwnedTaskId } from "@/lib/tasks/resolveTask";
 
 export const runtime = "nodejs";
 
@@ -76,6 +77,7 @@ function step3LeftRightGemstoneColorLockBlock(): string {
 }
 
 type Body = {
+  taskId?: string;
   provider: string;
   prompt: string;
   selectedMainImageId: string;
@@ -122,6 +124,7 @@ export async function POST(req: Request) {
 
   const body = (await req.json().catch(() => ({}))) as Partial<Body>;
   const prompt = typeof body.prompt === "string" ? body.prompt : "";
+  const taskIdRaw = typeof body.taskId === "string" ? body.taskId : "";
   const provider = typeof body.provider === "string" ? body.provider : "nano-banana-pro";
   const selectedMainImageId = typeof body.selectedMainImageId === "string" ? body.selectedMainImageId : "";
   const selectedMainImageUrl =
@@ -146,6 +149,10 @@ export async function POST(req: Request) {
 
   if (!selectedMainImageId || !selectedMainImageUrl) {
     return NextResponse.json({ message: "缺少 selectedMainImage 信息。" }, { status: 400 });
+  }
+  const taskId = await ensureOwnedTaskId(authz.user.id, taskIdRaw);
+  if (!taskId) {
+    return NextResponse.json({ message: "无效 taskId" }, { status: 400 });
   }
 
   try {
@@ -320,6 +327,7 @@ export async function POST(req: Request) {
         }).then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
+            taskId,
             kind: "on_model",
             base64,
             sourceMainImageId: selectedMainImageId,
@@ -327,7 +335,7 @@ export async function POST(req: Request) {
             keyPrefix: `users/${authz.user.id}/step3/on_model`,
           });
           return makeGalleryImage({
-            id: `gallery_on_model_${selectedMainImageId}_${Date.now()}`,
+            id: persisted.id,
             type: "on_model",
             url: persisted.url,
             sourceMainImageId: selectedMainImageId,
@@ -371,6 +379,7 @@ export async function POST(req: Request) {
         }).then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
+            taskId,
             kind: "left",
             base64,
             sourceMainImageId: selectedMainImageId,
@@ -378,7 +387,7 @@ export async function POST(req: Request) {
             keyPrefix: `users/${authz.user.id}/step3/left`,
           });
           return makeGalleryImage({
-            id: `gallery_left_${selectedMainImageId}_${Date.now()}`,
+            id: persisted.id,
             type: "left",
             url: persisted.url,
             sourceMainImageId: selectedMainImageId,
@@ -422,6 +431,7 @@ export async function POST(req: Request) {
         }).then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
+            taskId,
             kind: "right",
             base64,
             sourceMainImageId: selectedMainImageId,
@@ -429,7 +439,7 @@ export async function POST(req: Request) {
             keyPrefix: `users/${authz.user.id}/step3/right`,
           });
           return makeGalleryImage({
-            id: `gallery_right_${selectedMainImageId}_${Date.now()}`,
+            id: persisted.id,
             type: "right",
             url: persisted.url,
             sourceMainImageId: selectedMainImageId,
@@ -474,6 +484,7 @@ export async function POST(req: Request) {
         }).then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
+            taskId,
             kind: "rear",
             base64,
             sourceMainImageId: selectedMainImageId,
@@ -481,7 +492,7 @@ export async function POST(req: Request) {
             keyPrefix: `users/${authz.user.id}/step3/rear`,
           });
           return makeGalleryImage({
-            id: `gallery_rear_${selectedMainImageId}_${Date.now()}`,
+            id: persisted.id,
             type: "rear",
             url: persisted.url,
             sourceMainImageId: selectedMainImageId,
@@ -524,6 +535,7 @@ export async function POST(req: Request) {
         }).then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
+            taskId,
             kind: "front",
             base64,
             sourceMainImageId: selectedMainImageId,
@@ -531,7 +543,7 @@ export async function POST(req: Request) {
             keyPrefix: `users/${authz.user.id}/step3/front`,
           });
           return makeGalleryImage({
-            id: `gallery_front_${selectedMainImageId}_${Date.now()}`,
+            id: persisted.id,
             type: "front",
             url: persisted.url,
             sourceMainImageId: selectedMainImageId,

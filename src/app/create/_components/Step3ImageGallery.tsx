@@ -15,13 +15,37 @@ const STEP3_LAYOUT_STORAGE_KEY = "jewelry-step3-layout-v1";
 const STEP3_LAYOUT_DEBUG_KEY = "STEP3_LAYOUT_DEBUG";
 type DetachedInsertMeta = { anchorGroupKey: string; position: "before" | "after" };
 
-function downloadDataUrl(url: string, filename: string) {
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+async function downloadImage(url: string, filename: string): Promise<void> {
+  const directHref = () => {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  if (url.startsWith("data:") || url.startsWith("blob:")) {
+    directHref();
+    return;
+  }
+
+  const res = await fetch(url, { credentials: "omit" });
+  if (!res.ok) {
+    throw new Error(`download failed (${res.status})`);
+  }
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 function getDataUrlExt(url: string): string {
@@ -484,7 +508,7 @@ export default function Step3ImageGallery() {
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const zipUrl = URL.createObjectURL(zipBlob);
-      downloadDataUrl(zipUrl, `step3_selected_${new Date().toISOString().slice(0, 10)}.zip`);
+      await downloadImage(zipUrl, `step3_selected_${new Date().toISOString().slice(0, 10)}.zip`);
       setTimeout(() => URL.revokeObjectURL(zipUrl), 1000);
     } catch (e) {
       console.error("Zip selected download failed:", e);
@@ -1109,9 +1133,13 @@ export default function Step3ImageGallery() {
                     <div className="pointer-events-auto absolute left-2 bottom-2 flex items-center gap-1">
                     <button
                       type="button"
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.stopPropagation();
-                        downloadDataUrl(img.url, `${img.type}_${img.id}.${getDataUrlExt(img.url)}`);
+                        try {
+                          await downloadImage(img.url, `${img.type}_${img.id}.${getDataUrlExt(img.url)}`);
+                        } catch {
+                          emitToast({ message: "下载失败：图片地址不可访问或跨域受限。", type: "error" });
+                        }
                       }}
                       className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-gray-800 ring-1 ring-gray-200 hover:bg-white"
                       aria-label="下载"
@@ -1480,9 +1508,13 @@ export default function Step3ImageGallery() {
                 ) : null}
                 <button
                   type="button"
-                  onClick={() =>
-                    downloadDataUrl(current.url, `${current.type}_${current.id}.${getDataUrlExt(current.url)}`)
-                  }
+                  onClick={async () => {
+                    try {
+                      await downloadImage(current.url, `${current.type}_${current.id}.${getDataUrlExt(current.url)}`);
+                    } catch {
+                      emitToast({ message: "下载失败：图片地址不可访问或跨域受限。", type: "error" });
+                    }
+                  }}
                   className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-semibold"
                 >
                   下载

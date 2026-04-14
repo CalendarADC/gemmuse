@@ -3,8 +3,11 @@ import { NextResponse } from "next/server";
 import type { Copywriting, GalleryImage } from "@/store/jewelryGeneratorStore";
 import { laoZhangChatCompletionSingleModel } from "@/lib/ai/laoZhangChatClient";
 import { requireApiActiveUser } from "@/lib/apiAuth";
+import { prisma } from "@/lib/db";
+import { ensureOwnedTaskId } from "@/lib/tasks/resolveTask";
 
 type Body = {
+  taskId?: string;
   provider: string;
   prompt: string;
   selectedMainImageId: string;
@@ -186,12 +189,17 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json().catch(() => ({}))) as Partial<Body>;
     prompt = typeof body.prompt === "string" ? body.prompt : "";
+    const taskIdRaw = typeof body.taskId === "string" ? body.taskId : "";
     const galleryImages = (body.galleryImages ?? []) as GalleryImage[];
     const selectedMainImageUrl =
       typeof body.selectedMainImageUrl === "string" ? body.selectedMainImageUrl : "";
 
     if (!prompt.trim()) {
       return NextResponse.json({ message: "缺少 prompt" }, { status: 400 });
+    }
+    const taskId = await ensureOwnedTaskId(authz.user.id, taskIdRaw);
+    if (!taskId) {
+      return NextResponse.json({ message: "无效 taskId" }, { status: 400 });
     }
 
     const imageUrls = collectVisionImageUrls(galleryImages, selectedMainImageUrl);
@@ -367,6 +375,19 @@ export async function POST(req: Request) {
       tags: finalTags,
       description,
     };
+
+    await prisma.generatedCopywriting.create({
+      data: {
+        userId: authz.user.id,
+        taskId,
+        selectedMainImageId: body.selectedMainImageId ?? null,
+        title,
+        tags: finalTags,
+        description,
+        debugUsedModel: usedModel,
+        debugImageCount,
+      },
+    });
 
     return NextResponse.json({
       ...copywriting,

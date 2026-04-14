@@ -19,6 +19,10 @@ import {
   type TaskIdbPayload,
   type TaskWorkspaceMeta,
 } from "@/lib/tasks/taskPersistence";
+import {
+  fetchTaskWorkspaceFromServer,
+  mergeTaskWorkspaceWithServer,
+} from "@/lib/tasks/mergeServerWorkspace";
 
 /** 将浏览器/Node 的 fetch 连接失败转为可读中文提示 */
 function friendlyFetchErrorMessage(e: unknown): string | undefined {
@@ -101,6 +105,8 @@ export type Copywriting = {
 export type GeneratorTask = {
   id: string;
   name: string;
+  sortOrder?: number;
+  currentStep?: "STEP1" | "STEP2" | "STEP3" | "STEP4";
   createdAt: string;
   updatedAt: string;
   /** 用于搜索与侧栏摘要，仅保留约 160 字 */
@@ -213,6 +219,8 @@ type JewelryGeneratorStore = {
   resetAll: () => void;
 
   createNewTask: (name?: string) => Promise<void>;
+  syncTasksFromServer: () => Promise<void>;
+  syncActiveTaskWorkspaceFromServer: () => Promise<void>;
   switchTask: (taskId: string) => Promise<void>;
   renameTask: (taskId: string, name: string) => void;
   setTaskProtected: (taskId: string, isProtected: boolean) => void;
@@ -268,7 +276,34 @@ function newTaskId(): string {
 
 function seedGeneratorTask(name: string): GeneratorTask {
   const now = new Date().toISOString();
-  return { id: newTaskId(), name, createdAt: now, updatedAt: now, searchLine: "", isProtected: false };
+  return {
+    id: newTaskId(),
+    name,
+    sortOrder: 0,
+    currentStep: "STEP1",
+    createdAt: now,
+    updatedAt: now,
+    searchLine: "",
+    isProtected: false,
+  };
+}
+
+type ServerTask = {
+  id: string;
+  name: string;
+  searchLine: string;
+  isProtected: boolean;
+  sortOrder: number;
+  currentStep: "STEP1" | "STEP2" | "STEP3" | "STEP4";
+  createdAt: string;
+  updatedAt: string;
+};
+
+async function fetchServerTasks(): Promise<ServerTask[]> {
+  const res = await fetch("/api/tasks", { method: "GET" });
+  if (!res.ok) throw new Error(`任务同步失败（HTTP ${res.status}）`);
+  const data = (await res.json().catch(() => ({}))) as { tasks?: ServerTask[] };
+  return Array.isArray(data.tasks) ? data.tasks : [];
 }
 
 const initialSidebarTask = seedGeneratorTask("任务 1");
@@ -554,6 +589,99 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         });
       },
 
+      syncTasksFromServer: async () => {
+        try {
+          const tasks = await fetchServerTasks();
+          if (!tasks.length) return;
+          const s = get();
+          const activeTaskId = tasks.some((t) => t.id === s.activeTaskId) ? s.activeTaskId : tasks[0].id;
+          set({
+            tasks: tasks.map((t) => ({
+              id: t.id,
+              name: t.name,
+              searchLine: t.searchLine,
+              isProtected: t.isProtected,
+              sortOrder: t.sortOrder,
+              currentStep: t.currentStep,
+              createdAt: t.createdAt,
+              updatedAt: t.updatedAt,
+              lastSuccessPrompt: s.tasks.find((x) => x.id === t.id)?.lastSuccessPrompt,
+            })),
+            activeTaskId,
+          });
+        } catch {
+          /* keep local fallback */
+        }
+      },
+
+      syncActiveTaskWorkspaceFromServer: async () => {
+        const s = get();
+        if (s.status.step1Generating || s.status.step3Generating || s.status.step4Generating) return;
+        const taskId = s.activeTaskId;
+        let loaded = await loadTaskFromIdb(taskId);
+        const serverWorkspace = await fetchTaskWorkspaceFromServer(taskId);
+        if (!serverWorkspace) return;
+        loaded = mergeTaskWorkspaceWithServer(loaded, serverWorkspace);
+        const targetTask = get().tasks.find((t) => t.id === taskId);
+        const promptForTask =
+          loaded.meta.prompt.trim() ||
+          (targetTask?.lastSuccessPrompt?.trim() ?? "") ||
+          readTaskPromptBackup(taskId).trim() ||
+          "";
+        flushTaskPromptBackup(taskId, promptForTask);
+        const mainIdSet = new Set([
+          ...loaded.mainImages.map((m) => m.id),
+          ...loaded.mainHistoryImages.map((m) => m.id),
+        ]);
+        let selectedMainImageId = loaded.meta.selectedMainImageId;
+        let selectedMainImageIds = loaded.meta.selectedMainImageIds.filter((id) => mainIdSet.has(id));
+        if (selectedMainImageId && !mainIdSet.has(selectedMainImageId)) {
+          selectedMainImageId = loaded.mainImages[0]?.id ?? loaded.mainHistoryImages[0]?.id ?? null;
+        }
+        if (!selectedMainImageIds.length && selectedMainImageId) {
+          selectedMainImageIds = [selectedMainImageId];
+        }
+        const primaryImg = selectedMainImageId
+          ? loaded.mainImages.find((x) => x.id === selectedMainImageId) ??
+            loaded.mainHistoryImages.find((x) => x.id === selectedMainImageId)
+          : null;
+        set({
+          provider: loaded.meta.provider,
+          prompt: promptForTask || loaded.meta.prompt,
+          count: clampCount(loaded.meta.count),
+          step1BananaImageModel: resolvedStep1BananaImageModel(loaded.meta),
+          step2BananaImageModel: resolvedStep2BananaImageModel(loaded.meta),
+          step1ExpansionStrength: loaded.meta.step1ExpansionStrength,
+          step1FastMode: loaded.meta.step1FastMode,
+          step2FastMode: loaded.meta.step2FastMode,
+          selectedMainImageId,
+          selectedMainImageUrl: primaryImg?.url ?? null,
+          selectedMainImageIds,
+          copywriting: loaded.meta.copywriting,
+          lastTextModelUsed: loaded.meta.lastTextModelUsed,
+          lastImageCountPassed: loaded.meta.lastImageCountPassed,
+          mainImages: loaded.mainImages,
+          mainHistoryImages: loaded.mainHistoryImages,
+          galleryImages: loaded.galleryImages,
+          galleryHistoryImages: loaded.galleryHistoryImages,
+          step1ReferenceImageDataUrls: [],
+          error: null,
+        });
+        void saveTaskToIdb(taskId, {
+          meta: {
+            ...loaded.meta,
+            prompt: promptForTask || loaded.meta.prompt,
+            selectedMainImageId,
+            selectedMainImageUrl: primaryImg?.url ?? null,
+            selectedMainImageIds,
+          },
+          mainImages: loaded.mainImages,
+          mainHistoryImages: loaded.mainHistoryImages,
+          galleryImages: loaded.galleryImages,
+          galleryHistoryImages: loaded.galleryHistoryImages,
+        }).catch(() => undefined);
+      },
+
       createNewTask: async (name) => {
         const s = get();
         if (s.status.step1Generating || s.status.step3Generating || s.status.step4Generating) {
@@ -567,15 +695,38 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         } catch {
           /* ignore */
         }
-        const now = new Date().toISOString();
-        const id = newTaskId();
         const taskName = (name?.trim() || `新任务 ${s.tasks.length + 1}`).slice(0, 80);
+        let createdServerTaskId: string | null = null;
+        try {
+          const res = await fetch("/api/tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: taskName }),
+          });
+          if (res.ok) {
+            const data = (await res.json().catch(() => ({}))) as { task?: { id?: string } };
+            createdServerTaskId = typeof data.task?.id === "string" ? data.task.id : null;
+          }
+        } catch {
+          /* keep local fallback */
+        }
+        const now = new Date().toISOString();
+        const id = createdServerTaskId ?? newTaskId();
         set({
           tasks: [
             ...s.tasks.map((t) =>
               t.id === s.activeTaskId ? { ...t, updatedAt: now } : t
             ),
-            { id, name: taskName, createdAt: now, updatedAt: now, searchLine: "", isProtected: false },
+            {
+              id,
+              name: taskName,
+              sortOrder: s.tasks.length,
+              currentStep: "STEP1",
+              createdAt: now,
+              updatedAt: now,
+              searchLine: "",
+              isProtected: false,
+            },
           ],
           activeTaskId: id,
           status: idleGeneratorStatus(),
@@ -620,7 +771,9 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           /* ignore */
         }
 
-        const loaded = await loadTaskFromIdb(taskId);
+        let loaded = await loadTaskFromIdb(taskId);
+        const serverWorkspace = await fetchTaskWorkspaceFromServer(taskId);
+        loaded = mergeTaskWorkspaceWithServer(loaded, serverWorkspace);
         const targetTask = s.tasks.find((t) => t.id === taskId);
         const promptForTask =
           loaded.meta.prompt.trim() ||
@@ -628,6 +781,23 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           readTaskPromptBackup(taskId).trim() ||
           "";
         flushTaskPromptBackup(taskId, promptForTask);
+        const mainIdSet = new Set([
+          ...loaded.mainImages.map((m) => m.id),
+          ...loaded.mainHistoryImages.map((m) => m.id),
+        ]);
+        let selectedMainImageId = loaded.meta.selectedMainImageId;
+        let selectedMainImageIds = loaded.meta.selectedMainImageIds.filter((id) => mainIdSet.has(id));
+        if (selectedMainImageId && !mainIdSet.has(selectedMainImageId)) {
+          selectedMainImageId =
+            loaded.mainImages[0]?.id ?? loaded.mainHistoryImages[0]?.id ?? null;
+        }
+        if (!selectedMainImageIds.length && selectedMainImageId) {
+          selectedMainImageIds = [selectedMainImageId];
+        }
+        const primaryImg = selectedMainImageId
+          ? loaded.mainImages.find((x) => x.id === selectedMainImageId) ??
+            loaded.mainHistoryImages.find((x) => x.id === selectedMainImageId)
+          : null;
         const now = new Date().toISOString();
         set({
           activeTaskId: taskId,
@@ -640,9 +810,9 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           step1ExpansionStrength: loaded.meta.step1ExpansionStrength,
           step1FastMode: loaded.meta.step1FastMode,
           step2FastMode: loaded.meta.step2FastMode,
-          selectedMainImageId: loaded.meta.selectedMainImageId,
-          selectedMainImageUrl: loaded.meta.selectedMainImageUrl,
-          selectedMainImageIds: loaded.meta.selectedMainImageIds,
+          selectedMainImageId,
+          selectedMainImageUrl: primaryImg?.url ?? null,
+          selectedMainImageIds,
           copywriting: loaded.meta.copywriting,
           lastTextModelUsed: loaded.meta.lastTextModelUsed,
           lastImageCountPassed: loaded.meta.lastImageCountPassed,
@@ -654,6 +824,19 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           error: null,
           tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, updatedAt: now } : t)),
         });
+        void saveTaskToIdb(taskId, {
+          meta: {
+            ...loaded.meta,
+            prompt: promptForTask,
+            selectedMainImageId,
+            selectedMainImageUrl: primaryImg?.url ?? null,
+            selectedMainImageIds,
+          },
+          mainImages: loaded.mainImages,
+          mainHistoryImages: loaded.mainHistoryImages,
+          galleryImages: loaded.galleryImages,
+          galleryHistoryImages: loaded.galleryHistoryImages,
+        }).catch(() => undefined);
       },
 
       renameTask: (taskId, name) => {
@@ -665,6 +848,11 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             t.id === taskId ? { ...t, name: trimmed, updatedAt: now } : t
           ),
         }));
+        void fetch("/api/tasks", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskId, name: trimmed }),
+        }).catch(() => undefined);
       },
 
       setTaskProtected: (taskId, isProtected) => {
@@ -675,6 +863,11 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           ),
           error: null,
         }));
+        void fetch("/api/tasks", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskId, isProtected }),
+        }).catch(() => undefined);
       },
 
       deleteTask: async (taskId) => {
@@ -698,6 +891,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         const nextTasks = s.tasks.filter((t) => t.id !== taskId);
         await deleteTaskFromIdb(taskId).catch(() => undefined);
         clearTaskPromptBackup(taskId);
+        void fetch(`/api/tasks?taskId=${encodeURIComponent(taskId)}`, { method: "DELETE" }).catch(() => undefined);
 
         if (s.activeTaskId !== taskId) {
           set({ tasks: nextTasks, error: null });
@@ -707,22 +901,43 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         flushDebouncedTaskMetaSave();
         const nextId = nextTasks[0].id;
         let loaded = await loadTaskFromIdb(nextId);
+        const serverWorkspace = await fetchTaskWorkspaceFromServer(nextId);
+        loaded = mergeTaskWorkspaceWithServer(loaded, serverWorkspace);
+        const promptForNext = loaded.meta.prompt.trim() || readTaskPromptBackup(nextId).trim() || "";
+        flushTaskPromptBackup(nextId, promptForNext);
+        const mainIdSet = new Set([
+          ...loaded.mainImages.map((m) => m.id),
+          ...loaded.mainHistoryImages.map((m) => m.id),
+        ]);
+        let selectedMainImageId = loaded.meta.selectedMainImageId;
+        let selectedMainImageIds = loaded.meta.selectedMainImageIds.filter((id) => mainIdSet.has(id));
+        if (selectedMainImageId && !mainIdSet.has(selectedMainImageId)) {
+          selectedMainImageId =
+            loaded.mainImages[0]?.id ?? loaded.mainHistoryImages[0]?.id ?? null;
+        }
+        if (!selectedMainImageIds.length && selectedMainImageId) {
+          selectedMainImageIds = [selectedMainImageId];
+        }
+        const primaryImg = selectedMainImageId
+          ? loaded.mainImages.find((x) => x.id === selectedMainImageId) ??
+            loaded.mainHistoryImages.find((x) => x.id === selectedMainImageId)
+          : null;
         const now = new Date().toISOString();
         set({
           tasks: nextTasks.map((t) => (t.id === nextId ? { ...t, updatedAt: now } : t)),
           activeTaskId: nextId,
           status: idleGeneratorStatus(),
           provider: loaded.meta.provider,
-          prompt: loaded.meta.prompt,
+          prompt: promptForNext || loaded.meta.prompt,
           count: clampCount(loaded.meta.count),
           step1BananaImageModel: resolvedStep1BananaImageModel(loaded.meta),
           step2BananaImageModel: resolvedStep2BananaImageModel(loaded.meta),
           step1ExpansionStrength: loaded.meta.step1ExpansionStrength,
           step1FastMode: loaded.meta.step1FastMode,
           step2FastMode: loaded.meta.step2FastMode,
-          selectedMainImageId: loaded.meta.selectedMainImageId,
-          selectedMainImageUrl: loaded.meta.selectedMainImageUrl,
-          selectedMainImageIds: loaded.meta.selectedMainImageIds,
+          selectedMainImageId,
+          selectedMainImageUrl: primaryImg?.url ?? null,
+          selectedMainImageIds,
           copywriting: loaded.meta.copywriting,
           lastTextModelUsed: loaded.meta.lastTextModelUsed,
           lastImageCountPassed: loaded.meta.lastImageCountPassed,
@@ -733,6 +948,19 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           step1ReferenceImageDataUrls: [],
           error: null,
         });
+        void saveTaskToIdb(nextId, {
+          meta: {
+            ...loaded.meta,
+            prompt: promptForNext || loaded.meta.prompt,
+            selectedMainImageId,
+            selectedMainImageUrl: primaryImg?.url ?? null,
+            selectedMainImageIds,
+          },
+          mainImages: loaded.mainImages,
+          mainHistoryImages: loaded.mainHistoryImages,
+          galleryImages: loaded.galleryImages,
+          galleryHistoryImages: loaded.galleryHistoryImages,
+        }).catch(() => undefined);
       },
 
       reorderTasks: (draggedId, targetId) => {
@@ -746,6 +974,13 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           let insertAt = toIdx;
           if (fromIdx < toIdx) insertAt = toIdx - 1;
           next.splice(insertAt, 0, removed);
+          next.forEach((t, idx) => {
+            void fetch("/api/tasks", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ taskId: t.id, sortOrder: idx }),
+            }).catch(() => undefined);
+          });
           return { tasks: next };
         });
       },
@@ -825,6 +1060,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           prompt,
           count,
           provider,
+          activeTaskId,
           step1BananaImageModel,
           step1ExpansionStrength,
           step1FastMode,
@@ -862,6 +1098,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               prompt,
+              taskId: activeTaskId,
               count,
               provider,
               bananaImageModel: step1BananaImageModel,
@@ -908,12 +1145,18 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
                 ? {
                     ...t,
                     updatedAt: now,
+                    currentStep: "STEP2",
                     searchLine: line || t.searchLine,
                     lastSuccessPrompt: prompt.trim() || t.lastSuccessPrompt,
                   }
                 : t
             ),
           });
+          void fetch("/api/tasks", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ taskId: st.activeTaskId, currentStep: "STEP2", searchLine: line }),
+          }).catch(() => undefined);
           const stAfter = get();
           // 必须在 hydration 完成前也落盘：否则用户很快生图并刷新时 meta.prompt 从未写入，刷新后输入框为空。
           flushDebouncedTaskMetaSave();
@@ -945,6 +1188,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         const {
           prompt,
           provider,
+          activeTaskId,
           step2BananaImageModel,
           step1ExpansionStrength,
           step1FastMode,
@@ -975,6 +1219,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               prompt,
+              taskId: activeTaskId,
               count: 1,
               provider,
               bananaImageModel: step2BananaImageModel,
@@ -1096,6 +1341,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         const {
           provider,
           prompt,
+          activeTaskId,
           step2FastMode,
           step2BananaImageModel,
           selectedMainImageIds,
@@ -1149,6 +1395,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               provider,
+              taskId: activeTaskId,
               prompt,
               fastMode: step2FastMode,
               bananaImageModel: step2BananaImageModel,
@@ -1182,7 +1429,15 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             galleryHistoryImages: [...get().galleryHistoryImages, ...merged],
             status: withStep3Generating(get().status, false),
             error: null,
+            tasks: get().tasks.map((t) =>
+              t.id === get().activeTaskId ? { ...t, currentStep: "STEP3", updatedAt: new Date().toISOString() } : t
+            ),
           });
+          void fetch("/api/tasks", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ taskId: get().activeTaskId, currentStep: "STEP3" }),
+          }).catch(() => undefined);
           return merged.length > 0;
         } catch (e) {
           const message = friendlyFetchErrorMessage(e);
@@ -1198,6 +1453,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         const {
           provider,
           prompt,
+          activeTaskId,
           step1FastMode,
           step2FastMode,
           step2BananaImageModel,
@@ -1263,6 +1519,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 prompt,
+                taskId: activeTaskId,
                 count: 1,
                 provider,
                 bananaImageModel: step2BananaImageModel,
@@ -1315,6 +1572,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   provider,
+                  taskId: activeTaskId,
                   prompt,
                   fastMode: step2FastMode,
                   bananaImageModel: step2BananaImageModel,
@@ -1362,6 +1620,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 provider,
+                taskId: activeTaskId,
                 prompt,
                 fastMode: step2FastMode,
                 bananaImageModel: step2BananaImageModel,
@@ -1516,6 +1775,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         const {
           prompt,
           provider,
+          activeTaskId,
           selectedMainImageId,
           selectedMainImageUrl,
           galleryImages,
@@ -1541,6 +1801,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               provider,
+              taskId: activeTaskId,
               prompt,
               selectedMainImageId,
               selectedMainImageUrl: selectedMainImageUrl ?? undefined,
@@ -1571,7 +1832,15 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               typeof data.debug_image_count === "number" ? data.debug_image_count : null,
             status: withStep4Generating(get().status, false),
             error: null,
+            tasks: get().tasks.map((t) =>
+              t.id === get().activeTaskId ? { ...t, currentStep: "STEP4", updatedAt: new Date().toISOString() } : t
+            ),
           });
+          void fetch("/api/tasks", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ taskId: get().activeTaskId, currentStep: "STEP4" }),
+          }).catch(() => undefined);
           const st = get();
           if (tasksHydrated) scheduleDebouncedTaskMetaSave(st.activeTaskId, pickTaskMeta(st));
         } catch (e) {

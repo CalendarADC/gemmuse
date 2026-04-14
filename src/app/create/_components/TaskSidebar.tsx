@@ -206,6 +206,10 @@ export default function TaskSidebar() {
   const activeTaskId = useJewelryGeneratorStore((s) => s.activeTaskId);
   const status = useJewelryGeneratorStore((s) => s.status);
   const createNewTask = useJewelryGeneratorStore((s) => s.createNewTask);
+  const syncTasksFromServer = useJewelryGeneratorStore((s) => s.syncTasksFromServer);
+  const syncActiveTaskWorkspaceFromServer = useJewelryGeneratorStore(
+    (s) => s.syncActiveTaskWorkspaceFromServer
+  );
   const switchTask = useJewelryGeneratorStore((s) => s.switchTask);
   const renameTask = useJewelryGeneratorStore((s) => s.renameTask);
   const setTaskProtected = useJewelryGeneratorStore((s) => s.setTaskProtected);
@@ -234,6 +238,13 @@ export default function TaskSidebar() {
   const busyGlobal = status.step1Generating || status.step3Generating || status.step4Generating;
 
   const closeTaskMenu = () => setTaskMenu(null);
+
+  useEffect(() => {
+    void (async () => {
+      await syncTasksFromServer();
+      await syncActiveTaskWorkspaceFromServer();
+    })();
+  }, [syncTasksFromServer, syncActiveTaskWorkspaceFromServer]);
 
   useEffect(() => {
     if (sidebarCollapsed) setTaskMenu(null);
