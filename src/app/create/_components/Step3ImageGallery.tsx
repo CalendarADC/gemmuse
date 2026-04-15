@@ -6,6 +6,7 @@ import { useJewelryGeneratorStore } from "@/store/jewelryGeneratorStore";
 import ImagePreviewModal from "./ImagePreviewModal";
 import BrandButton from "./BrandButton";
 import { emitToast } from "@/lib/ui/toast";
+import { downloadImage } from "@/lib/ui/downloadImage";
 import { applyStep1ReferenceFromGalleryUrl } from "@/lib/ui/applyStep1ReferenceFromGalleryUrl";
 import { CREATE_STEP_PAPER } from "./createStepShell";
 import { step1CircleBtnClass } from "./createToolbarCircleButton";
@@ -14,39 +15,6 @@ import { IconStep2Favorites, IconStep2History } from "./step2ToolbarIcons";
 const STEP3_LAYOUT_STORAGE_KEY = "jewelry-step3-layout-v1";
 const STEP3_LAYOUT_DEBUG_KEY = "STEP3_LAYOUT_DEBUG";
 type DetachedInsertMeta = { anchorGroupKey: string; position: "before" | "after" };
-
-async function downloadImage(url: string, filename: string): Promise<void> {
-  const directHref = () => {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
-
-  if (url.startsWith("data:") || url.startsWith("blob:")) {
-    directHref();
-    return;
-  }
-
-  const res = await fetch(url, { credentials: "omit" });
-  if (!res.ok) {
-    throw new Error(`download failed (${res.status})`);
-  }
-  const blob = await res.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  try {
-    const a = document.createElement("a");
-    a.href = objectUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
-}
 
 function getDataUrlExt(url: string): string {
   // url: data:image/png;base64,....

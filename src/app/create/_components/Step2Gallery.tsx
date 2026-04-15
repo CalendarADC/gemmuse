@@ -8,6 +8,7 @@ import BrandButton from "./BrandButton";
 import CircularSparkleGenerateButton from "./CircularSparkleGenerateButton";
 import Step1FlipClock from "./Step1FlipClock";
 import { emitToast } from "@/lib/ui/toast";
+import { downloadImage } from "@/lib/ui/downloadImage";
 import { CREATE_STEP_INSET, CREATE_STEP_PAPER } from "./createStepShell";
 import { step1CircleBtnClass } from "./createToolbarCircleButton";
 import ResolutionToggleIcon from "./ResolutionToggleIcon";
@@ -30,39 +31,6 @@ function IconStep1Brain({ className }: { className?: string }) {
       aria-hidden
     />
   );
-}
-
-async function downloadImage(url: string, filename: string): Promise<void> {
-  const directHref = () => {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
-
-  if (url.startsWith("data:") || url.startsWith("blob:")) {
-    directHref();
-    return;
-  }
-
-  const res = await fetch(url, { credentials: "omit" });
-  if (!res.ok) {
-    throw new Error(`download failed (${res.status})`);
-  }
-  const blob = await res.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  try {
-    const a = document.createElement("a");
-    a.href = objectUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
 }
 
 function getDataUrlExt(url: string): string {

@@ -37,6 +37,8 @@ npx prisma generate
 npx prisma db push
 ```
 
+If the app shows **`The table public.Task does not exist`** (or similar Prisma errors), the cloud database was never synced: run the same commands above with **production** `DATABASE_URL` (copy from Vercel env or Neon), then redeploy if needed.
+
 ## 4) Bootstrap first admin
 
 Run once with production env vars:

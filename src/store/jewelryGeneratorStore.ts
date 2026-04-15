@@ -594,19 +594,36 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           const tasks = await fetchServerTasks();
           if (!tasks.length) return;
           const s = get();
-          const activeTaskId = tasks.some((t) => t.id === s.activeTaskId) ? s.activeTaskId : tasks[0].id;
+          const serverIds = new Set(tasks.map((t) => t.id));
+          const serverTasks: GeneratorTask[] = tasks.map((t) => ({
+            id: t.id,
+            name: t.name,
+            searchLine: t.searchLine,
+            isProtected: t.isProtected,
+            sortOrder: t.sortOrder,
+            currentStep: t.currentStep,
+            createdAt: t.createdAt,
+            updatedAt: t.updatedAt,
+            lastSuccessPrompt: s.tasks.find((x) => x.id === t.id)?.lastSuccessPrompt,
+          }));
+          // 保留仅本地任务：数据库不可用期间生成的本地工作区不应被云端空列表覆盖。
+          const localOnlyTasks = s.tasks
+            .filter((t) => !serverIds.has(t.id))
+            .map((t, index) => ({
+              ...t,
+              sortOrder:
+                typeof t.sortOrder === "number"
+                  ? t.sortOrder
+                  : tasks.length + index,
+            }));
+          const mergedTasks = [...serverTasks, ...localOnlyTasks].sort(
+            (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
+          );
+          const activeTaskId = mergedTasks.some((t) => t.id === s.activeTaskId)
+            ? s.activeTaskId
+            : mergedTasks[0]?.id ?? s.activeTaskId;
           set({
-            tasks: tasks.map((t) => ({
-              id: t.id,
-              name: t.name,
-              searchLine: t.searchLine,
-              isProtected: t.isProtected,
-              sortOrder: t.sortOrder,
-              currentStep: t.currentStep,
-              createdAt: t.createdAt,
-              updatedAt: t.updatedAt,
-              lastSuccessPrompt: s.tasks.find((x) => x.id === t.id)?.lastSuccessPrompt,
-            })),
+            tasks: mergedTasks,
             activeTaskId,
           });
         } catch {
