@@ -1411,7 +1411,11 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
 
             if (!res.ok) {
               const data = (await res.json().catch(() => null)) as ApiError | null;
-              throw new Error(data?.message || `增强失败（HTTP ${res.status}）`);
+              const serverMsg =
+                typeof data?.message === "string" && data.message.trim()
+                  ? data.message.trim()
+                  : "";
+              throw new Error(serverMsg || `增强失败（HTTP ${res.status}）`);
             }
 
             const data = (await res.json()) as { galleryImages: GalleryImage[] };
@@ -1588,7 +1592,11 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
 
               if (!enhanceRes.ok) {
                 const data = (await enhanceRes.json().catch(() => null)) as ApiError | null;
-                throw new Error(data?.message || `刷新展示图失败（HTTP ${enhanceRes.status}）`);
+                const serverMsg =
+                  typeof data?.message === "string" && data.message.trim()
+                    ? data.message.trim()
+                    : "";
+                throw new Error(serverMsg || `刷新展示图失败（HTTP ${enhanceRes.status}）`);
               }
 
               const enhanceData = (await enhanceRes.json()) as { galleryImages: GalleryImage[] };
@@ -1636,7 +1644,11 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
 
             if (!res.ok) {
               const data = (await res.json().catch(() => null)) as ApiError | null;
-              throw new Error(data?.message || `刷新展示图失败（HTTP ${res.status}）`);
+              const serverMsg =
+                typeof data?.message === "string" && data.message.trim()
+                  ? data.message.trim()
+                  : "";
+              throw new Error(serverMsg || `刷新展示图失败（HTTP ${res.status}）`);
             }
 
             const data = (await res.json()) as { galleryImages: GalleryImage[] };

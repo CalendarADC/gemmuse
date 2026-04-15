@@ -122,6 +122,7 @@ export async function POST(req: Request) {
   const authz = await requireApiActiveUser();
   if (!authz.ok) return authz.response;
 
+  try {
   const body = (await req.json().catch(() => ({}))) as Partial<Body>;
   const prompt = typeof body.prompt === "string" ? body.prompt : "";
   const taskIdRaw = typeof body.taskId === "string" ? body.taskId : "";
@@ -150,12 +151,17 @@ export async function POST(req: Request) {
   if (!selectedMainImageId || !selectedMainImageUrl) {
     return NextResponse.json({ message: "缺少 selectedMainImage 信息。" }, { status: 400 });
   }
-  const taskId = await ensureOwnedTaskId(authz.user.id, taskIdRaw);
-  if (!taskId) {
-    return NextResponse.json({ message: "无效 taskId" }, { status: 400 });
-  }
+  /** 本地/不同步的 taskId 在库里不存在时仍允许出图，仅不落库关联任务 */
+  const taskIdForPersist =
+    (await ensureOwnedTaskId(authz.user.id, taskIdRaw)) ?? undefined;
 
-  try {
+  /** Node 端 fetch 需要绝对 URL；客户端有时会传站点相对路径 */
+  const resolvedMainImageUrl =
+    selectedMainImageUrl.startsWith("data:") ||
+    /^https?:\/\//i.test(selectedMainImageUrl)
+      ? selectedMainImageUrl
+      : new URL(selectedMainImageUrl, req.url).toString();
+
     const images: GalleryImage[] = [];
     const runNonce = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
@@ -164,7 +170,7 @@ export async function POST(req: Request) {
       makeGalleryImage({
         id: `gallery_main_${selectedMainImageId}_${runNonce}`,
         type: "main",
-        url: selectedMainImageUrl,
+        url: resolvedMainImageUrl,
         sourceMainImageId: selectedMainImageId,
       })
     );
@@ -321,13 +327,13 @@ export async function POST(req: Request) {
 
       jobs.push(
         laoZhangImageToImage({
-          initImageDataUrl: selectedMainImageUrl,
+          initImageDataUrl: resolvedMainImageUrl,
           prompt: editPrompt,
           ...sharedImgArgs,
         }).then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
-            taskId,
+            taskId: taskIdForPersist,
             kind: "on_model",
             base64,
             sourceMainImageId: selectedMainImageId,
@@ -373,13 +379,13 @@ export async function POST(req: Request) {
 
       jobs.push(
         laoZhangImageToImage({
-          initImageDataUrl: selectedMainImageUrl,
+          initImageDataUrl: resolvedMainImageUrl,
           prompt: editPrompt,
           ...sharedImgArgsLeftRight,
         }).then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
-            taskId,
+            taskId: taskIdForPersist,
             kind: "left",
             base64,
             sourceMainImageId: selectedMainImageId,
@@ -425,13 +431,13 @@ export async function POST(req: Request) {
 
       jobs.push(
         laoZhangImageToImage({
-          initImageDataUrl: selectedMainImageUrl,
+          initImageDataUrl: resolvedMainImageUrl,
           prompt: editPrompt,
           ...sharedImgArgsLeftRight,
         }).then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
-            taskId,
+            taskId: taskIdForPersist,
             kind: "right",
             base64,
             sourceMainImageId: selectedMainImageId,
@@ -478,13 +484,13 @@ export async function POST(req: Request) {
 
       jobs.push(
         laoZhangImageToImage({
-          initImageDataUrl: selectedMainImageUrl,
+          initImageDataUrl: resolvedMainImageUrl,
           prompt: editPrompt,
           ...sharedImgArgs,
         }).then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
-            taskId,
+            taskId: taskIdForPersist,
             kind: "rear",
             base64,
             sourceMainImageId: selectedMainImageId,
@@ -529,13 +535,13 @@ export async function POST(req: Request) {
 
       jobs.push(
         laoZhangImageToImage({
-          initImageDataUrl: selectedMainImageUrl,
+          initImageDataUrl: resolvedMainImageUrl,
           prompt: editPrompt,
           ...sharedImgArgs,
         }).then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
-            taskId,
+            taskId: taskIdForPersist,
             kind: "front",
             base64,
             sourceMainImageId: selectedMainImageId,
@@ -560,7 +566,15 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ galleryImages: images });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "增强失败";
+    console.error("[api/enhance]", e);
+    const message =
+      e instanceof Error && e.message.trim()
+        ? e.message
+        : e instanceof Error
+          ? "增强失败（服务器未返回详细原因）"
+          : typeof e === "string" && e.trim()
+            ? e
+            : "增强失败";
     return NextResponse.json({ message }, { status: 500 });
   }
 }
