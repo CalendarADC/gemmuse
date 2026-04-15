@@ -2014,6 +2014,11 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
                   /* ignore */
                 }
               }
+              try {
+                await useJewelryGeneratorStore.getState().syncActiveTaskWorkspaceFromServer();
+              } catch {
+                /* 离线或接口失败时保留本地 hydration 结果 */
+              }
             }
           })();
         });
