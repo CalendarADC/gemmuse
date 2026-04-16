@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import type { Copywriting, GalleryImage } from "@/store/jewelryGeneratorStore";
 import { laoZhangChatCompletionSingleModel } from "@/lib/ai/laoZhangChatClient";
-import { requireApiDesktopAuthorized } from "@/lib/apiAuth";
+import { requireApiActiveUser } from "@/lib/apiAuth";
 import { prisma } from "@/lib/db";
 import { ensureOwnedTaskId } from "@/lib/tasks/resolveTask";
 
@@ -182,7 +182,7 @@ function normalizeTagsFromLlm(tags: unknown): string[] {
 }
 
 export async function POST(req: Request) {
-  const authz = await requireApiDesktopAuthorized(req);
+  const authz = await requireApiActiveUser();
   if (!authz.ok) return authz.response;
 
   let prompt = "";

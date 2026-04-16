@@ -30,7 +30,7 @@ import {
   type PromptExpansionStrength,
   userExplicitEnvironmentOrSurfaceInPrompt,
 } from "@/lib/ai/jewelrySoftLimits";
-import { requireApiDesktopAuthorized } from "@/lib/apiAuth";
+import { requireApiActiveUser } from "@/lib/apiAuth";
 import { persistGeneratedImage } from "@/lib/images/persistGeneratedImage";
 import { ensureOwnedTaskId } from "@/lib/tasks/resolveTask";
 
@@ -64,7 +64,7 @@ function isValidReferenceDataUrl(v: string): boolean {
 }
 
 export async function POST(req: Request) {
-  const authz = await requireApiDesktopAuthorized(req);
+  const authz = await requireApiActiveUser();
   if (!authz.ok) return authz.response;
 
   const body = (await req.json().catch(() => ({}))) as Partial<Body>;
