@@ -50,6 +50,7 @@ export function userSpecifiedPendantOrNecklaceRearDetail(prompt: string): boolea
 export function buildPendantRearViewDefaultSolidBackBlock(): string {
   return [
     "PENDANT / NECKLACE — REAR (BACK) VIEW DEFAULT STRUCTURE (strict): for the focal pendant/charm when generating a rear/back camera shot; user text did NOT specify custom rear/back detailing.",
+    "FULL 3D VOLUME (rear view, strict): the back must still read as a sculpted jewelry body with believable thickness, curvature, and depth transitions — NOT a featureless flat mirror-card or paper-thin silhouette with zero volumetric read.",
     "SOLID CLOSED BACK PLANE: Even if the front has complex openwork, piercing, or deep relief, the rear-facing surface must read as ONE contiguous solid metal back plate — smooth, tidy, and opaque (light brushed/satin finish OK).",
     "NO SEE-THROUGH: Do NOT reveal hollow interiors, front-motif reverse, gemstone pavilion backs, or prongs as if seen through openings. The back must not read transparent, window-like, or 'looking into' the piece.",
     "NO PENETRATING PERFORATIONS on the rear plate for this shot: forbid sieve/mesh/grille rear, decorative through-holes, or filigree that continues as pierced-through structure on the back plane.",
@@ -363,10 +364,39 @@ export function buildRingPhysicalBlock(
   return lines.join("\n");
 }
 
+/**
+ * 吊坠/项链主图与多视角：3D 体积 + 可直立/不可直立两种合法陈列 + 禁止「图2」式反物理摆法。
+ * 图1/图2/图3 为内部命名，模型以文字语义执行，不依赖外部图片。
+ */
+export function buildPendantNecklaceHeroPresentationEnBlock(): string {
+  return [
+    "PENDANT / NECKLACE — 3D HERO + PRESENTATION (strict): Every pendant/charm must read as a fully sculpted 3D jewelry mass with believable wall thickness, relief depth, and undercuts — NOT a flat stamped coin, NOT a smooth paper-thin silhouette with no depth.",
+    "Rear / back views must still communicate solid volumetric form; forbid a pancake-flat back with zero curvature unless the user explicitly requests that rear style.",
+    "PHYSICS-FIRST DISPLAY (no necklace chain in frame unless on-model): BEFORE locking composition, infer whether this motif can realistically freestand on the tabletop without tipping (stable base / feet / broad bottom).",
+    "IF FREESTAND-PLAUSIBLE — use CENTERED UPRIGHT hero (internal style ref: Fig.3): stable floor contact, pendant centered as hero, bail + jump ring obey gravity (rest on head/motif or natural droop). FORBID rigid vertical bail with air gap as if pulled by an invisible chain.",
+    "IF NOT FREESTAND-PLAUSIBLE — use LEAN-AGAINST-SUPPORT hero (internal style ref: Fig.1): lean the pendant body against a clear physical backdrop (display box edge, velvet riser, fabric block, jewelry tray wall). Bail still obeys gravity on metal; weight must read supported.",
+    "FORBIDDEN WRONG PATTERN (internal style ref: Fig.2): a non-freestanding pendant balanced on a narrow tip/edge/crown with NO lean-support; bail stiff upward/backward ignoring gravity; one-point contact that would obviously topple in reality.",
+  ].join("\n");
+}
+
+/** Step1 中文系统提示内：吊坠/项链 3D + 陈列规则（与英文块语义一致） */
+export function buildChinesePendantNecklacePresentationBlock(): string {
+  return [
+    "【吊坠/项链 — 三维结构与陈列方式（系统软限制，必须执行）】",
+    "所有吊坠/项链主体必须为完整三维立体结构（可铸造/雕刻的实体厚度与体积），后视图须呈现完整三维形态与可信厚度，禁止整体退化成平面光滑「铁片章」式无体积感造型（用户 prompt 明确要透底/镂空背等时除外）。",
+    "生成前须优先判断：该造型在常见展示台面上，若无手扶、能否在重力下自然直立而不倒（重心是否落在可支撑底面/足底/平底等）。",
+    "可直立场景：采用「图3」式陈列——主体置于画面中心区域，底部与台面稳定接触，顶置 bail/连接环受重力自然垂落或轻靠头顶/造型金属，符合静力学；禁止 bail 反重力竖直悬空、像被隐形链子拽直。",
+    "不可直立场景：采用「图1」式陈列——主体须依靠首饰盒立面、绒布垫/展示块侧壁等**明确可见的支撑物**承托完成平衡，bail 仍须自然下垂或贴靠金属，符合重力。",
+    "错误示例「图2」（严禁）：在无法自然直立的前提下，用尖角/窄边/单点支撑「立」在台面上且无任何背景依靠；bail 僵硬上翘或反翘、无视重力；整体呈明显不稳、现实中会倾倒的摆法。",
+    "所有合法陈列结果均须保证 bail/活动环在无链入镜时仍呈现自然死重与可信金属接触，禁止「悬浮环」「隐形项链提拉感」。",
+  ].join("\n");
+}
+
 export function buildPendantPhysicalBlock(onModel: boolean): string {
   const lines = [
     "PHYSICAL PRODUCTION (PENDANT / NECKLACE) — manufacturability:",
     "- Bail / connector: functional bail with a clearly open path for chain (bail hole or slit visibly pass-through); NOT a dead sealed knot, NOT a solid ring with no chain entry.",
+    buildPendantNecklaceHeroPresentationEnBlock(),
   ];
   if (!onModel) {
     lines.push(
@@ -487,6 +517,7 @@ export function buildMainImageCompositionBlock(
     lines.push(
       "STEP1 PENDANT DISPLAY ANGLE (strict): front-facing or slight 3/4 toward camera so motif and stones read clearly; FORBID thin edge-only profile, side-only silhouette, or low grazing angles that hide the main face (same intent as upright ring hero — readable front, not side-only)."
     );
+    lines.push(buildPendantNecklaceHeroPresentationEnBlock());
   }
   return lines.join("\n");
 }
@@ -533,6 +564,7 @@ export function buildEnhanceSoftLimitSuffix(
 export function buildNanoBananaProStep1SystemPrompt(prompt: string): string {
   // 注意：图像模型不会把“输出一段提示词”展示出来给用户；
   // 这里是把这套协议当作“内部风格解析与执行指令”来约束图像生成。
+  const kind = inferJewelryProductKind(prompt);
   return [
     "SYSTEM PROMPT — 风格解析与执行协议（用于图像生成，不要输出内部思考）",
     "你是一位拥有 20 年经验的资深珠宝设计总监，精通全球艺术史与珠宝工艺。",
@@ -544,6 +576,7 @@ export function buildNanoBananaProStep1SystemPrompt(prompt: string): string {
     "整体结构需符合佩戴功能与人体工学，背面平滑无凹陷，杜绝‘半成品’或‘空心凹陷’的视觉效果。",
     "背面细节应与正面风格协调，共同构成一件完整的高端珠宝作品。",
     "",
+    ...(kind === "pendant" ? [buildChinesePendantNecklacePresentationBlock(), ""] : []),
     "【3D结构与工艺硬性约束】",
     "珠宝必须为完整3D实体：严禁空心、凹陷、未完成半成品感；需体现真实厚度、重量感与可佩戴的人体工学。",
     "吊坠后视图（Back View）默认：背面为完整实心金属底板（光滑整齐、不透明），即使正面有镂空/雕刻，背面也不得透视到内部或正面图案细节，不得出现穿透性孔洞或开放网格；封闭式盒状结构，而非开放笼状。若用户明确写了背面/后视细节（如透底、镂空背）则服从用户描述。",
