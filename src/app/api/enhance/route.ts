@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 
 import type { GalleryImage, GalleryImageType } from "@/store/jewelryGeneratorStore";
 
@@ -16,7 +16,7 @@ import {
   inferJewelryProductKind,
   userSpecifiedPendantOrNecklaceRearDetail,
 } from "@/lib/ai/jewelrySoftLimits";
-import { requireApiActiveUser } from "@/lib/apiAuth";
+import { requireApiDesktopAuthorized } from "@/lib/apiAuth";
 import { persistGeneratedImage } from "@/lib/images/persistGeneratedImage";
 import { ensureOwnedTaskId } from "@/lib/tasks/resolveTask";
 
@@ -25,37 +25,37 @@ export const runtime = "nodejs";
 function withEnhanceSoftLimits(
   prompt: string,
   corePrompt: string,
-  /** 当前正在生成的这一张是否为佩戴图（决定是否加强手指/链条解剖约束） */
+  /** ?????????????????????????/??????? */
   thisShotOnModel: boolean
 ): string {
   const kind = inferJewelryProductKind(prompt);
   return `${corePrompt}\n\n${buildEnhanceSoftLimitSuffix(prompt, kind, thisShotOnModel)}`;
 }
 
-/** Step3：仅以 Step2 选定主图为事实来源；文案不得驱动改款 */
+/** Step3??? Step2 ?????????????????? */
 function step3InputImageSovereigntyBlock(): string {
   return [
-    "STEP2 INPUT IMAGE — SOLE AUTHORITY (strict): The attached init image is the exact SKU the user selected. Your task is ONLY re-camera / relight / environment rules as stated — NOT a new design pass.",
-    "LOCK without drift: same primary species or motif (e.g. same animal — never swap cat for phoenix/rabbit/bird), same figure orientation vocabulary, same gemstone count, cuts, colors, and settings, same metal relief/filigree pattern and oxidation, same band width and topology.",
-    "FUNCTIONAL HARDWARE LOCK (strict): Any **bail, hanging loop, jump ring, or obvious chain connector** visible in the init image is part of the SKU. It must **survive every allowed viewpoint** — show it from the new angle (profile / 3/4 / rear / partial occlusion OK). **Never remove, seal shut, merge into decorative rim, or replace with flat filigree** so the chain path disappears.",
+    "STEP2 INPUT IMAGE ? SOLE AUTHORITY (strict): The attached init image is the exact SKU the user selected. Your task is ONLY re-camera / relight / environment rules as stated ? NOT a new design pass.",
+    "LOCK without drift: same primary species or motif (e.g. same animal ? never swap cat for phoenix/rabbit/bird), same figure orientation vocabulary, same gemstone count, cuts, colors, and settings, same metal relief/filigree pattern and oxidation, same band width and topology.",
+    "FUNCTIONAL HARDWARE LOCK (strict): Any **bail, hanging loop, jump ring, or obvious chain connector** visible in the init image is part of the SKU. It must **survive every allowed viewpoint** ? show it from the new angle (profile / 3/4 / rear / partial occlusion OK). **Never remove, seal shut, merge into decorative rim, or replace with flat filigree** so the chain path disappears.",
     "FORBID: alternate theme, substitute centerpiece, invented stones, different engraving, style remix, or 'improving' the design. If any USER TEXT conflicts with visible pixels in the init image, IGNORE that text for geometry and OBEY THE IMAGE.",
-    "COUNT LOCK (strict): The output must still depict exactly ONE jewelry body — the same single piece as the input. Never expand into multiple rings side-by-side, a trio lineup, or extra duplicate rings/pendants in frame.",
+    "COUNT LOCK (strict): The output must still depict exactly ONE jewelry body ? the same single piece as the input. Never expand into multiple rings side-by-side, a trio lineup, or extra duplicate rings/pendants in frame.",
     buildSingleJewelryPieceOnlyConstraintBlock(),
   ].join("\n\n");
 }
 
-/** 吊坠侧视等角度易把顶环「修没」— 单独加硬钉 */
+/** ???????????????? ????? */
 function step3PendantBailTopologyLockBlock(): string {
   return [
-    "PENDANT — BAIL / TOP CONNECTOR (strict, all Step3 product angles):",
+    "PENDANT ? BAIL / TOP CONNECTOR (strict, all Step3 product angles):",
     "The init image defines a **bail** (or jump ring / top hanger) attached above the motif. This is **mandatory manufacturing geometry**, not an optional flourish.",
-    "Left/right/rear/front table shots: you **must still render that bail as solid metal** — seen from the side, three-quarter, or back as appropriate. A partially hidden bail behind the head is OK; **a completely missing bail, bail absorbed into the outer filigree halo, or a sealed decorative disk with no through-opening** is NOT OK.",
+    "Left/right/rear/front table shots: you **must still render that bail as solid metal** ? seen from the side, three-quarter, or back as appropriate. A partially hidden bail behind the head is OK; **a completely missing bail, bail absorbed into the outer filigree halo, or a sealed decorative disk with no through-opening** is NOT OK.",
     "Keep the **same attachment junction and similar loop scale** as the source; do not delete the top loop to simplify a lying-on-side silhouette.",
-    "NO VISIBLE CHAIN — GRAVITY (table / product shots): if the init shows **no necklace chain**, preserve **physically plausible bail pose** — resting / tilted / leaning on the motif under gravity (like a loose loop on a cushion). **FORBID** converting it into a rigid vertical bail **floating** with an air gap as if pulled by an invisible chain.",
+    "NO VISIBLE CHAIN ? GRAVITY (table / product shots): if the init shows **no necklace chain**, preserve **physically plausible bail pose** ? resting / tilted / leaning on the motif under gravity (like a loose loop on a cushion). **FORBID** converting it into a rigid vertical bail **floating** with an air gap as if pulled by an invisible chain.",
   ].join("\n");
 }
 
-/** 设计愿景放在末尾并标明次级，降低与主图冲突时的权重 */
+/** ????????????????????????? */
 function step3UserTextSecondaryBlock(prompt: string): string {
   const t = prompt.trim();
   if (!t) return "";
@@ -66,11 +66,11 @@ function step3UserTextSecondaryBlock(prompt: string): string {
   ].join("\n");
 }
 
-/** 左/右视图易「换石色不换机位」— 单独钉死色相 */
+/** ?/?????????????? ?????? */
 function step3LeftRightGemstoneColorLockBlock(): string {
   return [
-    "GEMSTONE COLOR / HUE LOCK (strict — left/right only):",
-    "Every visible gem (center stone, eyes, accents) must keep the **same base hue and body color** as the init — e.g. **blue stays blue**, **green stays green**.",
+    "GEMSTONE COLOR / HUE LOCK (strict ? left/right only):",
+    "Every visible gem (center stone, eyes, accents) must keep the **same base hue and body color** as the init ? e.g. **blue stays blue**, **green stays green**.",
     "**FORBID** recoloring stones to simulate variety when the camera did not actually move. Gem hue shifts = **incorrect** output for this brief.",
     "Specular highlights may relocate with light; **do not** change underlying stone color, saturation, or apparent species/count.",
   ].join("\n");
@@ -82,16 +82,16 @@ type Body = {
   prompt: string;
   selectedMainImageId: string;
   selectedMainImageUrl: string;
-  /** true = 极速（2K）；false = 高清（4K） */
+  /** true = ???2K??false = ???4K? */
   fastMode?: boolean;
   onModel: boolean;
   left: boolean;
   right: boolean;
   rear: boolean;
   front?: boolean;
-  /** @deprecated 旧客户端；等价于 front */
+  /** @deprecated ???????? front */
   top?: boolean;
-  /** Step3：老张 Banana pro（Pro）或 Banana 2（Flash） */
+  /** Step3??? Banana pro?Pro?? Banana 2?Flash? */
   bananaImageModel?: "banana-pro" | "banana-2";
 };
 
@@ -119,7 +119,7 @@ function makeGalleryImage({
 }
 
 export async function POST(req: Request) {
-  const authz = await requireApiActiveUser();
+  const authz = await requireApiDesktopAuthorized(req);
   if (!authz.ok) return authz.response;
 
   try {
@@ -143,19 +143,19 @@ export async function POST(req: Request) {
   const laoZhangImageModel: LaoZhangImageModelId =
     bananaRaw === "banana-2" ? LAOZHANG_IMAGE_MODEL_FLASH : LAOZHANG_IMAGE_MODEL_PRO;
 
-  // Step3 以保真为主：略降随机性，减少 img2img 时「按文案重画成另一款」的漂移
+  // Step3 ?????????????? img2img ???????????????
   const sampling = provider === "nano-banana-pro" ? { temperature: 0.52, topP: 0.8 } : undefined;
   const samplingLeftRight =
     provider === "nano-banana-pro" ? { temperature: 0.4, topP: 0.72 } : undefined;
 
   if (!selectedMainImageId || !selectedMainImageUrl) {
-    return NextResponse.json({ message: "缺少 selectedMainImage 信息。" }, { status: 400 });
+    return NextResponse.json({ message: "?? selectedMainImage ???" }, { status: 400 });
   }
-  /** 本地/不同步的 taskId 在库里不存在时仍允许出图，仅不落库关联任务 */
+  /** ??/???? taskId ????????????????????? */
   const taskIdForPersist =
     (await ensureOwnedTaskId(authz.user.id, taskIdRaw)) ?? undefined;
 
-  /** Node 端 fetch 需要绝对 URL；客户端有时会传站点相对路径 */
+  /** Node ? fetch ???? URL?????????????? */
   const resolvedMainImageUrl =
     selectedMainImageUrl.startsWith("data:") ||
     /^https?:\/\//i.test(selectedMainImageUrl)
@@ -165,7 +165,7 @@ export async function POST(req: Request) {
     const images: GalleryImage[] = [];
     const runNonce = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
-    // 把主图也放进 gallery（Step 4 用统一的 galleryImages 做文案生成）
+    // ?????? gallery?Step 4 ???? galleryImages ??????
     images.push(
       makeGalleryImage({
         id: `gallery_main_${selectedMainImageId}_${runNonce}`,
@@ -193,8 +193,8 @@ export async function POST(req: Request) {
     const kind = inferJewelryProductKind(prompt);
 
     const baseKeepInstruction =
-      "IMAGE EDIT ONLY: Preserve the init image design bit-for-bit intent — zero redesign. Same silhouette, same motif, same stones, same metal finish; only apply the requested camera/environment change.";
-    // Step3 规则：除穿戴图外，其他视角必须与 Step1 主视图保持同一背景体系。
+      "IMAGE EDIT ONLY: Preserve the init image design bit-for-bit intent ? zero redesign. Same silhouette, same motif, same stones, same metal finish; only apply the requested camera/environment change.";
+    // Step3 ???????????????? Step1 ????????????
     const keepMainBackgroundInstruction =
       "BACKGROUND CONSISTENCY (strict): keep the exact same background style/color/lighting setup as the input main image; only change viewing angle. Do NOT replace with a new scene or different backdrop.";
     const strictFrontViewInstruction = [
@@ -205,46 +205,46 @@ export async function POST(req: Request) {
       "- Forbidden outputs: no side view, no oblique view, no partial close-up crop, and no intentional slanting to fake 3D depth.",
     ].join("\n");
 
-    /** 正视图：形象须「面朝镜头」竖直视向观者（标准电商正视），勿画成脸朝天空/指节的「朝上」 */
+    /** ???????????????????????????????????/??????? */
     const ringFrontFiguralFacingLens =
       kind === "ring"
         ? [
-            "RING FRONT VIEW — FIGURE ORIENTATION (strict, standard 正视图):",
-            "Treat this like a classic e-commerce frontal hero: camera at eye level faces the ring's **primary display face** (animal head, relief, or main stone plane). The sculpted figure must face **toward the camera** — eyes/muzzle toward the viewer in a **vertical** posture (good reference: frontal rabbit head ring).",
+            "RING FRONT VIEW ? FIGURE ORIENTATION (strict, standard ???):",
+            "Treat this like a classic e-commerce frontal hero: camera at eye level faces the ring's **primary display face** (animal head, relief, or main stone plane). The sculpted figure must face **toward the camera** ? eyes/muzzle toward the viewer in a **vertical** posture (good reference: frontal rabbit head ring).",
             "The shank reads as a **horizontal oval / ellipse** (band roughly edge-on from this angle). This is NOT a plan / overhead shot from above the finger.",
-            "FORBID: figure head tipped so the face aims **upward** toward sky/knuckle (zenith-facing) while the camera stays level — that wrong orientation is NOT acceptable for this frontal view. FORBID mixing this up with top-down.",
+            "FORBID: figure head tipped so the face aims **upward** toward sky/knuckle (zenith-facing) while the camera stays level ? that wrong orientation is NOT acceptable for this frontal view. FORBID mixing this up with top-down.",
           ].join("\n")
         : "";
 
     const pendantFrontMotifFacingLens =
       kind === "pendant"
         ? [
-            "PENDANT FRONT VIEW — MOTIF ORIENTATION: main motif faces the lens squarely at eye level (face plane toward camera), not tipped to face upward with a horizontal camera.",
+            "PENDANT FRONT VIEW ? MOTIF ORIENTATION: main motif faces the lens squarely at eye level (face plane toward camera), not tipped to face upward with a horizontal camera.",
           ].join("\n")
         : "";
 
     /**
-     * 吊坠左/右：必须与主图「正视英雄位」明显不同 — 斜侧/四分之三侧 + 躺平在台面（参考高质量电商侧拍：动物头吊坠在绒布上侧躺，可见轮廓厚度与 bail）。
+     * ???/?????????????????? ? ??/????? + ??????????????????????????????????? bail??
      */
-    /** 左/右易被判成「翻面拍背板」— 与后视图任务明确切开 */
+    /** ?/????????????? ?????????? */
     const pendantSideVsRearDisambiguation =
       kind === "pendant"
         ? [
-            "SIDE vs REAR — HARD DISAMBIGUATION (critical):",
+            "SIDE vs REAR ? HARD DISAMBIGUATION (critical):",
             "This output is a **LATERAL left or right product angle**, **NOT** a rear / back / reverse shot.",
-            "**FORBID** framing dominated by the **flat plain back plate** (brushed/satin reverse, undecorated oval disk, pin-back, or closure side) with **no main relief motif visible**. That composition belongs to **REAR view only** — if your image looks like a 'back of pendant' catalog shot, you picked the **wrong 180°**.",
-            "**REQUIRE** the **front relief** (lion/animal head, gem eyes, primary filigree face) to stay **in frame** as **profile, three-quarter, or side-on thickness** — readable muzzle/jaw line, ear edge, or asymmetric mane depth. The viewer must sense **orbiting the piece ~60–110° around a vertical axis**, **not** flipping it face-down.",
+            "**FORBID** framing dominated by the **flat plain back plate** (brushed/satin reverse, undecorated oval disk, pin-back, or closure side) with **no main relief motif visible**. That composition belongs to **REAR view only** ? if your image looks like a 'back of pendant' catalog shot, you picked the **wrong 180?*.",
+            "**REQUIRE** the **front relief** (lion/animal head, gem eyes, primary filigree face) to stay **in frame** as **profile, three-quarter, or side-on thickness** ? readable muzzle/jaw line, ear edge, or asymmetric mane depth. The viewer must sense **orbiting the piece ~60?110?around a vertical axis**, **not** flipping it face-down.",
           ].join("\n")
         : "";
 
-    /** 模型常把「侧视」画成对着凹模/镂空背面 — 与真正绕到侧面看凸起浮雕区分开 */
+    /** ??????????????/???? ? ??????????????? */
     const pendantConvexSideNoHollowMoldBlock =
       kind === "pendant"
         ? [
-            "CONVEX HERO SURFACE ONLY — NO HOLLOW / NEGATIVE MOLD (critical for left/right):",
+            "CONVEX HERO SURFACE ONLY ? NO HOLLOW / NEGATIVE MOLD (critical for left/right):",
             "The init image is the **outer display face**: **convex** cast relief (lion head, gems, filigree) toward the original camera. Left/right means: move the camera **around the piece** so you still see that **same outward sculpted skin**, in **profile or 3/4**.",
-            "**FORBID** the **hollow reverse / negative mold** look: a **concave** dish showing an **impression** of the lion (sunken eyes/snout as cavities), **intaglio back**, die-cast **cavity** facing the lens, or “looking into the back of the stamping”. If gems read as **dark pits** or the face looks **embossed inward** like a tray, that is **WRONG** — not a lateral side view.",
-            "**REQUIRE convex read**: **nose/snout, brows, mane ridges** project **toward open space** or sideways; gem **tables/crowns** catch light on **outer surfaces**; you see **metal thickness** and **silhouette edge** of the hero relief — as if a photographer **walked left/right around the storefront mannequin**, **not** turned the medal over.",
+            "**FORBID** the **hollow reverse / negative mold** look: a **concave** dish showing an **impression** of the lion (sunken eyes/snout as cavities), **intaglio back**, die-cast **cavity** facing the lens, or ?looking into the back of the stamping?. If gems read as **dark pits** or the face looks **embossed inward** like a tray, that is **WRONG** ? not a lateral side view.",
+            "**REQUIRE convex read**: **nose/snout, brows, mane ridges** project **toward open space** or sideways; gem **tables/crowns** catch light on **outer surfaces**; you see **metal thickness** and **silhouette edge** of the hero relief ? as if a photographer **walked left/right around the storefront mannequin**, **not** turned the medal over.",
             "The lit focal structure must be the **raised metal and stones of the known front**; **NOT** a shallow bowl of **negative relief** facing the camera.",
           ].join("\n")
         : "";
@@ -252,15 +252,15 @@ export async function POST(req: Request) {
     const pendantLeftRightViewFullBlock =
       kind === "pendant"
         ? [
-            "PENDANT — LEFT/RIGHT CAMERA (critical — do NOT output another frontal):",
+            "PENDANT ? LEFT/RIGHT CAMERA (critical ? do NOT output another frontal):",
             pendantSideVsRearDisambiguation,
             pendantConvexSideNoHollowMoldBlock,
             "The init image is usually a near-frontal hero. This output must **NOT** be a second straight-on / orthographic front duplicate: the motif plane must **NOT** stay parallel to the camera like the main shot.",
-            "Rotate the viewpoint strongly to the requested side into a **three-quarter oblique side shot** (good reference: leopard/lion head pendant on velvet — seen from above-side so you read snout/jaw **profile**, cheek plane, **metal thickness**, filigree depth, and the **bail loop from an angle** with its opening visible).",
-            "REQUIRE obvious **lateral information**: at least two of — side profile of head/muzzle, flank relief, asymmetric ear/mane read, bail seen from the side, visible back vs front plane separation.",
-            "BAIL NON-NEGOTIABLE (side view): the **bail must remain a separate metal loop/volume** attached at the top (or same azimuth as the source), readable in side or 3/4 — **never cropped off, never merged into the scalloped border, never deleted for a cleaner profile**.",
-            "REST ON SURFACE (strict): same display fabric/tray as main image; pendant **lies** on it with weight — contact shadows, slight cloth compression; FORBID floating, zero contact, or bolt-upright statue pose.",
-            "LYING POSE + CAMERA (strict): velvet/table pose is allowed, but the **camera must still sight the same outer convex hero relief** as the init, from a **left/right azimuth** — **FORBID** arranging the piece so the **hollow molded reverse / concave back impression** faces the lens (that reads as wrong rear, not side).",
+            "Rotate the viewpoint strongly to the requested side into a **three-quarter oblique side shot** (good reference: leopard/lion head pendant on velvet ? seen from above-side so you read snout/jaw **profile**, cheek plane, **metal thickness**, filigree depth, and the **bail loop from an angle** with its opening visible).",
+            "REQUIRE obvious **lateral information**: at least two of ? side profile of head/muzzle, flank relief, asymmetric ear/mane read, bail seen from the side, visible back vs front plane separation.",
+            "BAIL NON-NEGOTIABLE (side view): the **bail must remain a separate metal loop/volume** attached at the top (or same azimuth as the source), readable in side or 3/4 ? **never cropped off, never merged into the scalloped border, never deleted for a cleaner profile**.",
+            "REST ON SURFACE (strict): same display fabric/tray as main image; pendant **lies** on it with weight ? contact shadows, slight cloth compression; FORBID floating, zero contact, or bolt-upright statue pose.",
+            "LYING POSE + CAMERA (strict): velvet/table pose is allowed, but the **camera must still sight the same outer convex hero relief** as the init, from a **left/right azimuth** ? **FORBID** arranging the piece so the **hollow molded reverse / concave back impression** faces the lens (that reads as wrong rear, not side).",
             "FORBID: repeating the same frontal framing as the input; symmetric front mascot pose when the brief is left/right view.",
           ].join("\n")
         : "";
@@ -270,13 +270,13 @@ export async function POST(req: Request) {
     const ringLeftRightViewFullBlock =
       kind === "ring"
         ? [
-            "RING — LEFT/RIGHT CAMERA (critical — NOT a frontal reshoot):",
-            "The init is often a **frontal or three-quarter hero** on a surface. You must **orbit the camera ~60–120°** around the jewelry's **vertical axis** (through the finger hole toward the viewer) to the requested **LEFT or RIGHT** side of the set — **NOT** a zero-degree re-render with only polish/specular/gem tweaks.",
-            "**SUCCESS CHECK**: if the ring's **principal viewing bearing** and band ellipse read **the same** as the init (same hero angle with a 'refresh'), you **failed** — increase lateral orbit until **asymmetric** cues dominate.",
-            "**REQUIRE** at least **two** of: (a) **shank/band ellipse skew** — one side reads clearly narrower, the other wider vs init; (b) **gallery wall or prong row** asymmetrically dominant on the near side; (c) **figural tops**: snout/cheek/jaw **favors one camera side** in clear profile or strong 3/4; (d) **main stone table/crown** seen from a **visibly different tangent** (facet pattern not a copy of the hero).",
-            "Stay on the **same convex outer sculpted skin** as the hero — **FORBID** the face reading as a **concave hollow mold / negative impression** toward the lens (wrong flip, not lateral orbit).",
+            "RING ? LEFT/RIGHT CAMERA (critical ? NOT a frontal reshoot):",
+            "The init is often a **frontal or three-quarter hero** on a surface. You must **orbit the camera ~60?120?* around the jewelry's **vertical axis** (through the finger hole toward the viewer) to the requested **LEFT or RIGHT** side of the set ? **NOT** a zero-degree re-render with only polish/specular/gem tweaks.",
+            "**SUCCESS CHECK**: if the ring's **principal viewing bearing** and band ellipse read **the same** as the init (same hero angle with a 'refresh'), you **failed** ? increase lateral orbit until **asymmetric** cues dominate.",
+            "**REQUIRE** at least **two** of: (a) **shank/band ellipse skew** ? one side reads clearly narrower, the other wider vs init; (b) **gallery wall or prong row** asymmetrically dominant on the near side; (c) **figural tops**: snout/cheek/jaw **favors one camera side** in clear profile or strong 3/4; (d) **main stone table/crown** seen from a **visibly different tangent** (facet pattern not a copy of the hero).",
+            "Stay on the **same convex outer sculpted skin** as the hero ? **FORBID** the face reading as a **concave hollow mold / negative impression** toward the lens (wrong flip, not lateral orbit).",
             "Show **band thickness, stone profile, setting wall** from the requested orbit; **FORBID** another **identical straight-on front** duplicate.",
-            "FORBID: a **back-only** shot that hides the primary stone/face (only inner shank/sizing) when the brief is left/right — lateral orbit, not hiding the top.",
+            "FORBID: a **back-only** shot that hides the primary stone/face (only inner shank/sizing) when the brief is left/right ? lateral orbit, not hiding the top.",
           ].join("\n")
         : "";
 
@@ -302,7 +302,7 @@ export async function POST(req: Request) {
               "FRAMING (strict): do NOT do an extreme close-up of a single finger segment. Show a fuller hand-worn context (at least most of the hand, ideally full hand in frame) so wearing scale looks realistic and natural.",
               "Composition preference: 3/4 hand view or palm-down full-hand showcase with the ring clearly readable; keep natural anatomy and believable perspective.",
               "Use a clean, Etsy-friendly background. Natural lighting, sharp focus, realistic reflections.",
-              "FINGER PLACEMENT (strict): wear the ring on **index**, **middle**, or **ring finger** only — strongly prefer **index or middle** (食指 / 中指); rotate between index vs middle across generations. **FORBID pinky finger (小指)** — never place the ring on the little finger. Natural knuckle spacing and anatomy.",
+              "FINGER PLACEMENT (strict): wear the ring on **index**, **middle**, or **ring finger** only ? strongly prefer **index or middle** (?? / ??); rotate between index vs middle across generations. **FORBID pinky finger (??)** ? never place the ring on the little finger. Natural knuckle spacing and anatomy.",
               ringInnerSurfaceLock,
               "Avoid adding extra rings, avoid changing the gemstone, keep the ring centered and clearly visible.",
               step3UserTextSecondaryBlock(prompt),
@@ -313,7 +313,7 @@ export async function POST(req: Request) {
               pendantBailLock,
               "Generate an on-model shot: necklace/pendant worn naturally (cropped framing, no face focus), studio product photography.",
               "FRAMING (strict): avoid over-tight local crop; keep enough upper-torso/neck context so the wearing presentation reads as a complete on-model view.",
-              "Chain must drape naturally with gravity; chain links distinct and readable — not a blurry rope.",
+              "Chain must drape naturally with gravity; chain links distinct and readable ? not a blurry rope.",
               "Keep bail and pendant design identical to input; clean Etsy-friendly background.",
               step3UserTextSecondaryBlock(prompt),
             ];
@@ -323,7 +323,7 @@ export async function POST(req: Request) {
         true
       );
 
-      const debugPromptZh = `【生成视角】穿戴图\n【设计愿景】${prompt}\n\n${editPrompt}`;
+      const debugPromptZh = `?????????\n??????${prompt}\n\n${editPrompt}`;
 
       jobs.push(
         laoZhangImageToImage({
@@ -361,9 +361,9 @@ export async function POST(req: Request) {
           pendantBailLock,
           pendantLeftRightViewFullBlock,
           ringLeftRightViewFullBlock,
-          "LEFT VIEW — CAMERA ORBIT (strict): From the init **front hero**, orbit the camera **counterclockwise** around a **vertical axis through the jewelry** (top view): move ~**60–110°** toward the piece’s **left flank**. The **main relief / face / stones** must remain **visible in profile or three-quarter** — this is **NOT** a ~180° rotation to the **flat reverse / back plate**, and **NOT** a **concave hollow-mold / negative impression** of the face (that is invalid).",
-          "LEFT JOB — ASYMMETRY (strict): vs. the init hero, the frame must favor **more visible metal/shank and setting on the camera-left** and **clearer foreshortening toward camera-right** (counterclockwise orbit read — not a symmetric frontal).",
-          "Generate a LEFT-side product view: camera moved to the **LEFT** of the set (around ~60–110° from the old front axis), macro studio shot — NOT the same straight-on front as the input.",
+          "LEFT VIEW ? CAMERA ORBIT (strict): From the init **front hero**, orbit the camera **counterclockwise** around a **vertical axis through the jewelry** (top view): move ~**60?110?* toward the piece?s **left flank**. The **main relief / face / stones** must remain **visible in profile or three-quarter** ? this is **NOT** a ~180?rotation to the **flat reverse / back plate**, and **NOT** a **concave hollow-mold / negative impression** of the face (that is invalid).",
+          "LEFT JOB ? ASYMMETRY (strict): vs. the init hero, the frame must favor **more visible metal/shank and setting on the camera-left** and **clearer foreshortening toward camera-right** (counterclockwise orbit read ? not a symmetric frontal).",
+          "Generate a LEFT-side product view: camera moved to the **LEFT** of the set (around ~60?110?from the old front axis), macro studio shot ? NOT the same straight-on front as the input.",
           "Keep the jewelry design exactly identical to the input; only change camera position and resulting perspective.",
           ringInnerSurfaceLock,
           keepMainBackgroundInstruction,
@@ -375,7 +375,7 @@ export async function POST(req: Request) {
         false
       );
 
-      const debugPromptZh = `【生成视角】左侧视图\n【设计愿景】${prompt}\n\n${editPrompt}`;
+      const debugPromptZh = `??????????\n??????${prompt}\n\n${editPrompt}`;
 
       jobs.push(
         laoZhangImageToImage({
@@ -413,9 +413,9 @@ export async function POST(req: Request) {
           pendantBailLock,
           pendantLeftRightViewFullBlock,
           ringLeftRightViewFullBlock,
-          "RIGHT VIEW — CAMERA ORBIT (strict): From the init **front hero**, orbit **clockwise** around the **vertical axis** ~**60–110°** toward the piece’s **right flank**. **Relief / motif must stay visible** in profile or 3/4 — **NOT** the undecorated back surface facing the lens, and **NOT** a **concave hollow-mold / negative impression** of the face.",
-          "RIGHT JOB — ASYMMETRY (strict): vs. the init hero, the frame must favor **more visible metal/shank and setting on the camera-right** and **clearer foreshortening toward camera-left** (clockwise orbit read — not a symmetric frontal).",
-          "Generate a RIGHT-side product view: camera moved to the **RIGHT** of the set (around ~60–110° from the old front axis), macro studio shot — NOT the same straight-on front as the input.",
+          "RIGHT VIEW ? CAMERA ORBIT (strict): From the init **front hero**, orbit **clockwise** around the **vertical axis** ~**60?110?* toward the piece?s **right flank**. **Relief / motif must stay visible** in profile or 3/4 ? **NOT** the undecorated back surface facing the lens, and **NOT** a **concave hollow-mold / negative impression** of the face.",
+          "RIGHT JOB ? ASYMMETRY (strict): vs. the init hero, the frame must favor **more visible metal/shank and setting on the camera-right** and **clearer foreshortening toward camera-left** (clockwise orbit read ? not a symmetric frontal).",
+          "Generate a RIGHT-side product view: camera moved to the **RIGHT** of the set (around ~60?110?from the old front axis), macro studio shot ? NOT the same straight-on front as the input.",
           "Keep the jewelry design exactly identical to the input; only change camera position and resulting perspective.",
           ringInnerSurfaceLock,
           keepMainBackgroundInstruction,
@@ -427,7 +427,7 @@ export async function POST(req: Request) {
         false
       );
 
-      const debugPromptZh = `【生成视角】右侧视图\n【设计愿景】${prompt}\n\n${editPrompt}`;
+      const debugPromptZh = `??????????\n??????${prompt}\n\n${editPrompt}`;
 
       jobs.push(
         laoZhangImageToImage({
@@ -467,7 +467,7 @@ export async function POST(req: Request) {
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           pendantBailLock,
-          "Generate a REAR / BACK view of the jewelry: show the back of the setting, rear of bail (for pendants), clasp back, or inner/back surfaces as appropriate—still as a clean studio product shot.",
+          "Generate a REAR / BACK view of the jewelry: show the back of the setting, rear of bail (for pendants), clasp back, or inner/back surfaces as appropriate?still as a clean studio product shot.",
           "Keep the jewelry exactly identical to the input image in design; only change the camera angle.",
           pendantRearDefaultSolidBack,
           ringInnerSurfaceLock,
@@ -480,7 +480,7 @@ export async function POST(req: Request) {
         false
       );
 
-      const debugPromptZh = `【生成视角】后视图\n【设计愿景】${prompt}\n\n${editPrompt}`;
+      const debugPromptZh = `?????????\n??????${prompt}\n\n${editPrompt}`;
 
       jobs.push(
         laoZhangImageToImage({
@@ -531,7 +531,7 @@ export async function POST(req: Request) {
         false
       );
 
-      const debugPromptZh = `【生成视角】正视图\n【设计愿景】${prompt}\n\n${editPrompt}`;
+      const debugPromptZh = `?????????\n??????${prompt}\n\n${editPrompt}`;
 
       jobs.push(
         laoZhangImageToImage({
@@ -571,10 +571,11 @@ export async function POST(req: Request) {
       e instanceof Error && e.message.trim()
         ? e.message
         : e instanceof Error
-          ? "增强失败（服务器未返回详细原因）"
+          ? "????????????????"
           : typeof e === "string" && e.trim()
             ? e
-            : "增强失败";
+            : "????";
     return NextResponse.json({ message }, { status: 500 });
   }
 }
+

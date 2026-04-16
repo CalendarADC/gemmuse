@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 
 import { getAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import {
+  DESKTOP_CLIENT_HEADER,
+  DESKTOP_DEVICE_HEADER,
+  DESKTOP_TOKEN_HEADER,
+  validateDesktopAccess,
+} from "@/lib/desktopAuth";
 
 export async function requireApiActiveUser() {
   const session = await getAuthSession();
@@ -36,4 +42,23 @@ export async function requireApiAdmin() {
     };
   }
   return base;
+}
+
+export async function requireApiDesktopAuthorized(req: Request) {
+  const base = await requireApiActiveUser();
+  if (!base.ok) return base;
+
+  const access = await validateDesktopAccess({
+    userId: base.user.id,
+    client: req.headers.get(DESKTOP_CLIENT_HEADER)?.trim().toLowerCase() ?? "",
+    deviceId: req.headers.get(DESKTOP_DEVICE_HEADER) ?? "",
+    token: req.headers.get(DESKTOP_TOKEN_HEADER) ?? "",
+  });
+  if (!access.ok) {
+    return {
+      ok: false as const,
+      response: NextResponse.json({ message: access.message }, { status: access.status }),
+    };
+  }
+  return { ok: true as const, user: base.user, desktopSession: access.session };
 }

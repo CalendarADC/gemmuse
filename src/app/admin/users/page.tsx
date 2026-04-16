@@ -11,6 +11,7 @@ async function updateUser(formData: FormData) {
 
   const userId = String(formData.get("userId") || "");
   const action = String(formData.get("action") || "");
+  const deviceId = String(formData.get("deviceId") || "");
 
   if (!userId) return;
 
@@ -24,10 +25,18 @@ async function updateUser(formData: FormData) {
       where: { id: userId },
       data: { status: "REJECTED" },
     });
+    await prisma.desktopSession.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
   } else if (action === "disable") {
     await prisma.user.update({
       where: { id: userId },
       data: { status: "DISABLED" },
+    });
+    await prisma.desktopSession.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
     });
   } else if (action === "enable") {
     await prisma.user.update({
@@ -50,6 +59,27 @@ async function updateUser(formData: FormData) {
       where: { id: userId },
       data: { passwordHash },
     });
+  } else if (action === "approve_device" && deviceId) {
+    await prisma.desktopDevice.updateMany({
+      where: { id: deviceId, userId },
+      data: {
+        status: "APPROVED",
+        approvedAt: new Date(),
+        revokedAt: null,
+      },
+    });
+  } else if (action === "revoke_device" && deviceId) {
+    await prisma.desktopDevice.updateMany({
+      where: { id: deviceId, userId },
+      data: {
+        status: "REVOKED",
+        revokedAt: new Date(),
+      },
+    });
+    await prisma.desktopSession.updateMany({
+      where: { deviceId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
   }
 
   revalidatePath("/admin/users");
@@ -66,6 +96,17 @@ export default async function AdminUsersPage() {
       role: true,
       status: true,
       createdAt: true,
+      desktopDevices: {
+        orderBy: [{ updatedAt: "desc" }],
+        select: {
+          id: true,
+          deviceName: true,
+          status: true,
+          updatedAt: true,
+          approvedAt: true,
+          revokedAt: true,
+        },
+      },
     },
   });
 
@@ -88,17 +129,52 @@ export default async function AdminUsersPage() {
               <th className="px-4 py-3 text-left">角色</th>
               <th className="px-4 py-3 text-left">状态</th>
               <th className="px-4 py-3 text-left">注册时间</th>
+              <th className="px-4 py-3 text-left">桌面设备</th>
               <th className="px-4 py-3 text-left">操作</th>
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
+            {users.map((u: (typeof users)[number]) => (
               <tr key={u.id} className="border-t border-zinc-100">
                 <td className="px-4 py-3">{u.name || "-"}</td>
                 <td className="px-4 py-3">{u.email}</td>
                 <td className="px-4 py-3">{u.role}</td>
                 <td className="px-4 py-3">{u.status}</td>
                 <td className="px-4 py-3">{u.createdAt.toLocaleString()}</td>
+                <td className="px-4 py-3">
+                  <div className="space-y-2">
+                    {u.desktopDevices.length ? (
+                      u.desktopDevices.map((d: (typeof u.desktopDevices)[number]) => (
+                        <div key={d.id} className="rounded border border-zinc-200 p-2 text-xs text-zinc-700">
+                          <div className="font-medium">{d.deviceName}</div>
+                          <div className="mt-1 text-zinc-500">
+                            状态：{d.status} · 更新时间：{d.updatedAt.toLocaleString()}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {d.status !== "APPROVED" ? (
+                              <form action={updateUser}>
+                                <input type="hidden" name="userId" value={u.id} />
+                                <input type="hidden" name="deviceId" value={d.id} />
+                                <input type="hidden" name="action" value="approve_device" />
+                                <button className="rounded bg-emerald-600 px-2 py-1 text-white">批准设备</button>
+                              </form>
+                            ) : null}
+                            {d.status !== "REVOKED" ? (
+                              <form action={updateUser}>
+                                <input type="hidden" name="userId" value={u.id} />
+                                <input type="hidden" name="deviceId" value={d.id} />
+                                <input type="hidden" name="action" value="revoke_device" />
+                                <button className="rounded bg-rose-600 px-2 py-1 text-white">撤销设备</button>
+                              </form>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <span className="text-xs text-zinc-400">暂无设备</span>
+                    )}
+                  </div>
+                </td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-2">
                     {u.status === "PENDING" ? (

@@ -1,15 +1,23 @@
 {
   "name": "jewelry-ai-generator",
   "version": "0.1.0",
+  "description": "GemMuse desktop and web jewelry AI generator",
+  "author": "GemMuse",
   "private": true,
+  "main": "dist-desktop/main.js",
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/prisma-generate-for-build.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
-    "seed:admin": "tsx scripts/seed-admin.ts"
+    "seed:admin": "tsx scripts/seed-admin.ts",
+    "desktop:compile": "tsc -p desktop/tsconfig.json",
+    "desktop:dev": "tsx desktop/dev.ts",
+    "desktop:build": "node desktop/build-release.mjs",
+    "desktop:pack": "electron-builder --win --dir --publish never"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1030.0",
@@ -31,11 +39,49 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "electron": "^41.2.0",
+    "electron-builder": "^26.8.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.0",
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5"
+  },
+  "build": {
+    "appId": "com.gemmuse.desktop",
+    "productName": "GemMuse Desktop",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "release-dist"
+    },
+    "files": [
+      ".next/standalone/**/*",
+      ".next/static/**/*",
+      "public/**/*",
+      "dist-desktop/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "dist-desktop/main.js"
+    },
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": false
+    }
   }
 }

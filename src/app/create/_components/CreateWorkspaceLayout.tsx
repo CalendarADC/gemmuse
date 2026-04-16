@@ -5,6 +5,7 @@ import DragScrollAssist from "./DragScrollAssist";
 import AppToastHost from "./AppToastHost";
 import TaskSidebar from "./TaskSidebar";
 import CreateStepNav from "./CreateStepNav";
+import DesktopAccessGate from "./DesktopAccessGate";
 
 export default function CreateWorkspaceLayout({ children }: { children: ReactNode }) {
   return (
@@ -41,6 +42,7 @@ export default function CreateWorkspaceLayout({ children }: { children: ReactNod
           <div className="relative mx-auto min-h-0 w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
             <DragScrollAssist />
             <AppToastHost />
+            <DesktopAccessGate />
             {children}
           </div>
         </div>

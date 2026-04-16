@@ -52,31 +52,29 @@ function repairGallerySourceMainIds(gallery: GalleryImage[], mains: MainImage[])
   });
 }
 
+/**
+ * 合并本地与云端主图：按 id 并集。同 id 以云端为准（持久化 URL/字段更可信）。
+ * 切勿在 server 非空时仅用 server 覆盖——否则会丢掉仅存在于 IndexedDB 的 Step2 历史，
+ * 在 Step3 完成后触发 workspace 同步时表现为历史与输入被清空。
+ */
 function mergeMainsDedupe(localCurrent: MainImage[], localHist: MainImage[], server: MainImage[]): MainImage[] {
-  if (server.length) {
-    const byId = new Map<string, MainImage>();
-    for (const m of server) byId.set(m.id, m);
-    return Array.from(byId.values()).sort((a, b) => parseTime(b.createdAt) - parseTime(a.createdAt));
-  }
   const byId = new Map<string, MainImage>();
+  for (const m of localHist) byId.set(m.id, m);
   for (const m of localCurrent) byId.set(m.id, m);
-  for (const m of localHist) if (!byId.has(m.id)) byId.set(m.id, m);
+  for (const m of server) byId.set(m.id, m);
   return Array.from(byId.values()).sort((a, b) => parseTime(b.createdAt) - parseTime(a.createdAt));
 }
 
+/** 同上：展示图历史与当前集合与云端并集，避免同步时冲掉未落库或合成 id 的本地条目。 */
 function mergeGalleryDedupe(
   localHist: GalleryImage[],
   localCurrent: GalleryImage[],
   server: GalleryImage[]
 ): GalleryImage[] {
-  if (server.length) {
-    const byId = new Map<string, GalleryImage>();
-    for (const g of server) byId.set(g.id, g);
-    return Array.from(byId.values()).sort((a, b) => parseTime(b.createdAt) - parseTime(a.createdAt));
-  }
   const byId = new Map<string, GalleryImage>();
-  for (const g of localHist) if (!byId.has(g.id)) byId.set(g.id, g);
-  for (const g of localCurrent) if (!byId.has(g.id)) byId.set(g.id, g);
+  for (const g of localHist) byId.set(g.id, g);
+  for (const g of localCurrent) byId.set(g.id, g);
+  for (const g of server) byId.set(g.id, g);
   const merged = Array.from(byId.values());
   merged.sort((a, b) => parseTime(b.createdAt) - parseTime(a.createdAt));
   return merged;

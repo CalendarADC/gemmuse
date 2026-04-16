@@ -1459,6 +1459,14 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ taskId: get().activeTaskId, currentStep: "STEP3" }),
           }).catch(() => undefined);
+          const stAfterStep3 = get();
+          flushDebouncedTaskMetaSave();
+          try {
+            await persistActiveWorkspace(stAfterStep3);
+          } catch (err) {
+            console.warn("[GemMuse] persistActiveWorkspace failed after Step3 enhance", err);
+          }
+          flushTaskPromptBackup(stAfterStep3.activeTaskId, stAfterStep3.prompt);
           return merged.length > 0;
         } catch (e) {
           const message = friendlyFetchErrorMessage(e);

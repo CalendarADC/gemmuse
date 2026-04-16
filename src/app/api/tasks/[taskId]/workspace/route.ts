@@ -63,7 +63,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ taskId: string
     : null;
 
   return NextResponse.json({
-    images: images.map((r) => ({
+    images: images.map((r: (typeof images)[number]) => ({
       id: r.id,
       kind: r.kind,
       url: r.url,

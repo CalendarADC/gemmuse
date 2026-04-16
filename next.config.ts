@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
+const standalone = process.env.NEXT_OUTPUT_STANDALONE === "1";
+
 const nextConfig: NextConfig = {
-  /* config options here */
+  ...(standalone ? { output: "standalone" } : {}),
 };
 
 export default nextConfig;

@@ -26,6 +26,12 @@ enum TaskStep {
   STEP4
 }
 
+enum DesktopDeviceStatus {
+  PENDING
+  APPROVED
+  REVOKED
+}
+
 model User {
   id            String      @id @default(cuid())
   name          String?
@@ -42,6 +48,8 @@ model User {
   tasks         Task[]
   generatedImages GeneratedImage[]
   generatedCopywritings GeneratedCopywriting[]
+  desktopDevices DesktopDevice[]
+  desktopSessions DesktopSession[]
 }
 
 model Task {
@@ -126,4 +134,38 @@ model GeneratedCopywriting {
   task               Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
   @@index([userId, taskId, createdAt])
+}
+
+model DesktopDevice {
+  id           String             @id @default(cuid())
+  userId       String
+  deviceIdHash String
+  deviceName   String
+  status       DesktopDeviceStatus @default(PENDING)
+  lastSeenAt   DateTime?
+  approvedAt   DateTime?
+  revokedAt    DateTime?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions     DesktopSession[]
+
+  @@unique([userId, deviceIdHash])
+  @@index([userId, status, updatedAt])
+}
+
+model DesktopSession {
+  id          String       @id @default(cuid())
+  userId      String
+  deviceId    String
+  tokenHash   String       @unique
+  expiresAt   DateTime
+  lastSeenAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device      DesktopDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, deviceId, expiresAt])
 }
