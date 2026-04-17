@@ -6,9 +6,12 @@ export type CappyCalmMaterialPreset = "s925" | "brass";
 
 const IP_RE = /cappy\s*calm/i;
 
-/** 与 public/references/cappy-calm/ 下文件名一致 */
-export function cappyCalmReferencePublicPath(preset: CappyCalmMaterialPreset): string {
-  return preset === "s925" ? "/references/cappy-calm/s925.png" : "/references/cappy-calm/brass.png";
+/** 与 public/references/cappy-calm/ 下文件名一致；925 银含主造型 + 户外露营变体两张。 */
+export function cappyCalmReferencePublicPaths(preset: CappyCalmMaterialPreset): readonly string[] {
+  if (preset === "s925") {
+    return ["/references/cappy-calm/s925.png", "/references/cappy-calm/s925-camping.png"] as const;
+  }
+  return ["/references/cappy-calm/brass.png"] as const;
 }
 
 /**
@@ -29,8 +32,8 @@ export function detectCappyCalmMaterialPreset(prompt: string): CappyCalmMaterial
 export function buildCappyCalmCharacterLockBlock(preset: CappyCalmMaterialPreset): string {
   const sheet =
     preset === "s925"
-      ? "first reference = official **925 sterling / oxidized silver** Cappy Calm character sheet."
-      : "first reference = official **brass / warm gold-tone** Cappy Calm character sheet.";
+      ? "the **first one or two references** are official **925 sterling / oxidized silver** Cappy Calm sheets (classic hero + outdoor/camping variant) — same IP read for proportions and bail."
+      : "the **first reference** is the official **brass / warm gold-tone** Cappy Calm character sheet.";
   return [
     "CAPPY CALM IP — PARTIAL LOCK (reference vs. text):",
     sheet,

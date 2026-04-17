@@ -1,6 +1,6 @@
 import {
   type CappyCalmMaterialPreset,
-  cappyCalmReferencePublicPath,
+  cappyCalmReferencePublicPaths,
   detectCappyCalmMaterialPreset,
 } from "@/lib/ip/cappyCalm";
 
@@ -48,10 +48,14 @@ export async function resolveCappyCalmStep1ReferenceDataUrls(
   if (!preset) {
     return { referenceImageDataUrls: userDataUrls.slice(0, MAX_STEP1_REFS), cappyCalmLockPreset: null };
   }
-  const ipUrl = await fetchPublicImageAsDataUrl(cappyCalmReferencePublicPath(preset));
-  if (!ipUrl) {
+  const ipUrls: string[] = [];
+  for (const path of cappyCalmReferencePublicPaths(preset)) {
+    const u = await fetchPublicImageAsDataUrl(path);
+    if (u) ipUrls.push(u);
+  }
+  if (!ipUrls.length) {
     return { referenceImageDataUrls: userDataUrls.slice(0, MAX_STEP1_REFS), cappyCalmLockPreset: null };
   }
-  const merged = [ipUrl, ...userDataUrls].slice(0, MAX_STEP1_REFS);
+  const merged = [...ipUrls, ...userDataUrls].slice(0, MAX_STEP1_REFS);
   return { referenceImageDataUrls: merged, cappyCalmLockPreset: preset };
 }
