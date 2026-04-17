@@ -288,6 +288,43 @@ export function userWantsDelicateThinWomensRing(prompt: string): boolean {
   return false;
 }
 
+/**
+ * Step3 佩戴图：用户意图为「适合女性佩戴 / 女戒 / 通勤秀气」等时，加强完整手部与高端棚拍气质。
+ * 与 userWantsDelicateThinWomensRing 对齐并略扩同义表达。
+ */
+export function userWantsWomensRingOnModelPresentation(prompt: string): boolean {
+  if (userWantsDelicateThinWomensRing(prompt)) return true;
+  const p = prompt.trim();
+  const pl = p.toLowerCase();
+  if (
+    /(女款戒|女式戒|女性戒指|女生戒指|女士款|优雅戒指|气质戒指|送女友|送老婆|送女生)/i.test(p)
+  ) {
+    return true;
+  }
+  if (
+    /\b(ladies|lady|feminine|elegant)\b.*\bring\b/i.test(pl) ||
+    /\bring\b.*\b(ladies|lady|feminine|for\s+her)\b/i.test(pl)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 戒指 on-model：女性向参考 — 完整手部、欧美手型主参考、优雅大气背景（英文进 img2img）。
+ */
+export function buildRingWomensOnModelLuxuryPresentationBlock(): string {
+  return [
+    "WOMEN'S-RING ON-MODEL — LUXURY EDITORIAL REFERENCE (strict): treat the user's brief as a ring suitable for women / elegant wear; match premium e-commerce + high-jewelry campaign quality.",
+    "HAND & MODEL READ (strict): show a **natural adult woman's hand** with **European / North American** proportions and skin tone (fair to light-medium) as the **primary default** hand type — believable knuckles, relaxed tendons, realistic skin micro-texture (NOT plastic).",
+    "FULL-HAND FRAMING (strict): **most or all fingers visible** plus the back of the hand in a relaxed diagonal or gentle 3/4 pose; the ring finger (or chosen allowed finger) must read clearly but **NOT** as an isolated single-finger macro — preserve **full-hand wearing context** like a luxury catalog on-model shot.",
+    "POSE: fingers softly curved, calm elegant gesture; ring centered and readable on the chosen finger.",
+    "MANICURE: **medium almond** nails, glossy **neutral nude / beige** polish — sophisticated, not distracting.",
+    "BACKGROUND & ATMOSPHERE (strict): **elegant, upscale, quiet-luxury** — soft **shallow bokeh** in warm **beige / tan / champagne** neutrals (suggest fine fabric or refined interior blur), **no clutter**, no busy props, no loud colors.",
+    "LIGHTING: **soft diffused studio / editorial** wrap light with gentle speculars on metal and stone; forbid harsh flat flash, cheap snapshot glare, or muddy gray flatness.",
+  ].join("\n");
+}
+
 /** Step1：细戒/通勤/女性向时约束主题体量与戒臂融合，避免头重脚轻、造型夸张 */
 export function buildDelicateRingMotifScaleIntegrationBlock(prompt: string): string {
   if (!userWantsDelicateThinWomensRing(prompt)) return "";

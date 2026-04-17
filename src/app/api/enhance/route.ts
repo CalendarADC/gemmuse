@@ -12,9 +12,11 @@ import {
 import {
   buildEnhanceSoftLimitSuffix,
   buildPendantRearViewDefaultSolidBackBlock,
+  buildRingWomensOnModelLuxuryPresentationBlock,
   buildSingleJewelryPieceOnlyConstraintBlock,
   inferJewelryProductKind,
   userSpecifiedPendantOrNecklaceRearDetail,
+  userWantsWomensRingOnModelPresentation,
 } from "@/lib/ai/jewelrySoftLimits";
 import { requireApiActiveUser } from "@/lib/apiAuth";
 import { persistGeneratedImage } from "@/lib/images/persistGeneratedImage";
@@ -299,6 +301,9 @@ export async function POST(req: Request) {
               step3InputImageSovereigntyBlock(),
               baseKeepInstruction,
               "Generate an on-model shot where the ring is worn on a human hand in a studio product photography style.",
+              ...(userWantsWomensRingOnModelPresentation(prompt)
+                ? [buildRingWomensOnModelLuxuryPresentationBlock()]
+                : []),
               "FRAMING (strict): do NOT do an extreme close-up of a single finger segment. Show a fuller hand-worn context (at least most of the hand, ideally full hand in frame) so wearing scale looks realistic and natural.",
               "Composition preference: 3/4 hand view or palm-down full-hand showcase with the ring clearly readable; keep natural anatomy and believable perspective.",
               "Use a clean, Etsy-friendly background. Natural lighting, sharp focus, realistic reflections.",
