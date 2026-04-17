@@ -46,16 +46,20 @@ export function userSpecifiedPendantOrNecklaceRearDetail(prompt: string): boolea
   );
 }
 
-/** Step3 吊坠/项链后视图：无用户自定义背面描述时的默认封底结构（英文，供 img2img prompt） */
+/**
+ * Step3 吊坠/项链后视图：无用户自定义背面描述时，用「几何结构补全 / 工业建模」约束（英文进 img2img）。
+ * 与旧版「整块光滑封底板」不同：背面须有与正面体量匹配的深度与细节，禁止图3式空白大平面。
+ */
 export function buildPendantRearViewDefaultSolidBackBlock(): string {
   return [
-    "PENDANT / NECKLACE — REAR (BACK) VIEW DEFAULT STRUCTURE (strict): for the focal pendant/charm when generating a rear/back camera shot; user text did NOT specify custom rear/back detailing.",
-    "FULL 3D VOLUME (rear view, strict): the back must still read as a sculpted jewelry body with believable thickness, curvature, and depth transitions — NOT a featureless flat mirror-card or paper-thin silhouette with zero volumetric read.",
-    "SOLID CLOSED BACK PLANE: Even if the front has complex openwork, piercing, or deep relief, the rear-facing surface must read as ONE contiguous solid metal back plate — smooth, tidy, and opaque (light brushed/satin finish OK).",
-    "NO SEE-THROUGH: Do NOT reveal hollow interiors, front-motif reverse, gemstone pavilion backs, or prongs as if seen through openings. The back must not read transparent, window-like, or 'looking into' the piece.",
-    "NO PENETRATING PERFORATIONS on the rear plate for this shot: forbid sieve/mesh/grille rear, decorative through-holes, or filigree that continues as pierced-through structure on the back plane.",
-    "CLOSED-BOX READ: The body must look like a sealed manufactured shell from behind (closed box / sealed locket back), NOT an open cage, open-backed basket, or open grid.",
-    "Bail / loop attachment: show only as solid metal junctions on or through the back plate; keep physically plausible and visually closed.",
+    "PENDANT / NECKLACE — REAR (BACK) VIEW: INDUSTRIAL GEOMETRY COMPLETION (strict): user text did NOT specify custom rear/back detailing; perform **geometric structure completion** as in jewelry CAD / cast modeling.",
+    "MENTAL MODEL: imagine a **solid metal blank** that was **machined / cast / engraved away** — front bosses (feathers, faces, bezels, filigree) imply **matched wall thickness, inner ribs, stepped relief, and symmetry** on the reverse. The piece must read as **hand-rotatable 360° jewelry** with no \"paper back\".",
+    "POSITIVE (rear — forward constraints): **back view of the pendant**; **full 3D solid structure**; **complete details on the back**; **symmetrical design** when the front motif is symmetric; **complex coherent geometry matching the front silhouette**; **industrial jewelry modeling standard**; **solid metal casting read**; **deep relief** on the reverse; **realistic silver (or user-alloy) texture** with controlled oxidation in recesses; **intricate reverse-side detail** — panel seams, structural webs, gem-seat backs, quill-backs of feathers, under-gallery struts as appropriate.",
+    "FORBID (rear — negative constraints): **flat back**, **empty back**, **smooth featureless slab**, **2D-only relief**, **paper-thin sheet**, **missing structural detail**, **simplified placeholder geometry**, **only outline silhouette** with no believable Z-depth.",
+    "OPACITY / NO X-RAY: remain **opaque solid metal** — do NOT render a transparent \"window\" into the front motif or stones from behind; no magic see-through of the front design through solid metal.",
+    "WEARABILITY: avoid toy-like **random sieve perforations** across the whole rear that would break skin contact; pierced/openwork rear ONLY if the user prompt clearly requests it.",
+    "BAIL / HARDWARE on rear: show believable **solid posts, junctions, and inner loop paths** — never delete or seal shut the functional bail.",
+    "QUALITY BAR: match **high-end CAD reverse completion** (comparable to pro 3D jewelry tools auto-completing a back view) — the reverse must feel **authored and manufacturable**, not a rushed flat fill.",
   ].join("\n");
 }
 
@@ -607,16 +611,16 @@ export function buildNanoBananaProStep1SystemPrompt(prompt: string): string {
     "你是一位拥有 20 年经验的资深珠宝设计总监，精通全球艺术史与珠宝工艺。",
     "",
     "你是一位专业珠宝设计师兼 3D 渲染师。在生成珠宝图像时，必须确保所有戒指（ring）和吊坠（pendant）均为完整的三维实体，具备真实物理结构。",
-    "正面设计需精美复杂，背面则必须有合理的封底结构，如光滑银底、品牌铭牌或风格化浮雕。",
+    "正面设计需精美复杂；背面须为可信金属封底与结构补全——可为对称深浮雕、分区肌理、品牌铭牌区或几何背纹，与正面体块重量感一致，避免无信息的大块镜面空背。",
     "吊坠背面应包含挂环与链条连接结构（仅体现连接位置/孔位，不在画面中展示链条本体），并体现焊接或铸造的工艺痕迹。",
     "主图无项链链条时：顶置 bail/挂环须受重力自然垂落或轻靠于头顶/造型顶部，禁止呈「被隐形链子拽直」的悬空竖立环（反物理）。",
-    "整体结构需符合佩戴功能与人体工学，背面平滑无凹陷，杜绝‘半成品’或‘空心凹陷’的视觉效果。",
+    "整体结构需符合佩戴功能与人体工学；与皮肤主接触带可适度平顺，但装饰背面仍可有工业级浮雕起伏，杜绝大面积虚假空心、纸片金属或半成品感。",
     "背面细节应与正面风格协调，共同构成一件完整的高端珠宝作品。",
     "",
     ...(kind === "pendant" ? [buildChinesePendantNecklacePresentationBlock(), ""] : []),
     "【3D结构与工艺硬性约束】",
     "珠宝必须为完整3D实体：严禁空心、凹陷、未完成半成品感；需体现真实厚度、重量感与可佩戴的人体工学。",
-    "吊坠后视图（Back View）默认：背面为完整实心金属底板（光滑整齐、不透明），即使正面有镂空/雕刻，背面也不得透视到内部或正面图案细节，不得出现穿透性孔洞或开放网格；封闭式盒状结构，而非开放笼状。若用户明确写了背面/后视细节（如透底、镂空背）则服从用户描述。",
+    "吊坠后视图（无用户单独描述背面时）默认：按工业珠宝建模做几何补全——想象整块金属经雕刻去料而成；正面凸起在背面须有对应厚度、支撑与对称肌理，深浮雕与细节铺满，禁止退化成无信息的大光滑「铁片背」；实体可手持把玩、360° 不穿帮；不得从背面透视看穿正面图案，不得开放笼状未封闭结构。若用户 prompt 明确透底/镂空背等则服从。",
     "连接处（Bail & Loop）必须牢固且可制造，体现焊接/铸造工艺痕迹；仅体现链条连接孔位，不在主图中展示链条本体。",
     "",
     "无论用户输入何种风格（如新艺术风格、神秘主义艺术风格、赛博朋克、极简主义、工业运动美术风格等多重风格），你必须严格遵循以下“三步设计法”进行创作：",

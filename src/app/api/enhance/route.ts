@@ -460,7 +460,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const pendantRearDefaultSolidBack =
+    const pendantRearIndustrialGeometryBlock =
       kind === "pendant" && !userSpecifiedPendantOrNecklaceRearDetail(prompt)
         ? buildPendantRearViewDefaultSolidBackBlock()
         : "";
@@ -473,8 +473,11 @@ export async function POST(req: Request) {
           baseKeepInstruction,
           pendantBailLock,
           "Generate a REAR / BACK view of the jewelry: show the back of the setting, rear of bail (for pendants), clasp back, or inner/back surfaces as appropriate?still as a clean studio product shot.",
+          kind === "pendant"
+            ? "PENDANT REAR PRIORITY: treat this as **industrial geometry completion** — the reverse must read as a **designed CAD back** with depth, not a blank polished slab."
+            : "",
           "Keep the jewelry exactly identical to the input image in design; only change the camera angle.",
-          pendantRearDefaultSolidBack,
+          pendantRearIndustrialGeometryBlock,
           ringInnerSurfaceLock,
           keepMainBackgroundInstruction,
           "Realistic reflections, no extra jewelry, no hands.",
