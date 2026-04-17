@@ -37,7 +37,13 @@ function friendlyFetchErrorMessage(e: unknown): string | undefined {
     msg === "fetch failed" ||
     /failed to fetch|networkerror|load failed|network request failed/i.test(msg)
   ) {
-    return "无法连接服务器：请确认已在项目目录运行 npm run dev，并在浏览器打开 http://localhost:3000 后再试。";
+    if (typeof window !== "undefined") {
+      const h = window.location.hostname;
+      if (h === "localhost" || h === "127.0.0.1") {
+        return "无法连接服务器：请确认已在项目目录运行 npm run dev，并在浏览器打开与终端一致的本地地址（常见为 http://localhost:3000）后再试。";
+      }
+    }
+    return "无法连接服务器：请检查本机网络、VPN/代理或广告拦截插件；若使用线上站点，请稍后重试或确认 Vercel 部署与域名可访问。（请求发往当前页面域名，不会使用你电脑上的 localhost。）";
   }
   return msg;
 }
