@@ -19,6 +19,7 @@ import {
   type TaskIdbPayload,
   type TaskWorkspaceMeta,
 } from "@/lib/tasks/taskPersistence";
+import { resolveCappyCalmStep1ReferenceDataUrls } from "@/lib/ip/resolveCappyCalmStep1References";
 import {
   fetchTaskWorkspaceFromServer,
   mergeTaskWorkspaceWithServer,
@@ -1118,6 +1119,8 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         });
 
         try {
+          const { referenceImageDataUrls, cappyCalmLockPreset } =
+            await resolveCappyCalmStep1ReferenceDataUrls(prompt, step1ReferenceImageDataUrls);
           // 约定返回：
           // { images: [{ id, url, createdAt? }, ...] }
           const res = await fetch("/api/generate-main", {
@@ -1131,9 +1134,8 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               bananaImageModel: step1BananaImageModel,
               fastMode: step1FastMode,
               expansionStrength: step1ExpansionStrength,
-              ...(step1ReferenceImageDataUrls.length
-                ? { referenceImageDataUrls: step1ReferenceImageDataUrls }
-                : {}),
+              ...(referenceImageDataUrls.length ? { referenceImageDataUrls } : {}),
+              ...(cappyCalmLockPreset ? { cappyCalmLockPreset } : {}),
             }),
           });
 
@@ -1305,6 +1307,8 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         });
 
         try {
+          const { referenceImageDataUrls, cappyCalmLockPreset } =
+            await resolveCappyCalmStep1ReferenceDataUrls(prompt, step1ReferenceImageDataUrls);
           // 只生成 1 张并替换该 id
           const res = await fetch("/api/generate-main", {
             method: "POST",
@@ -1317,9 +1321,8 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               bananaImageModel: step2BananaImageModel,
               fastMode: step1FastMode,
               expansionStrength: step1ExpansionStrength,
-              ...(step1ReferenceImageDataUrls.length
-                ? { referenceImageDataUrls: step1ReferenceImageDataUrls }
-                : {}),
+              ...(referenceImageDataUrls.length ? { referenceImageDataUrls } : {}),
+              ...(cappyCalmLockPreset ? { cappyCalmLockPreset } : {}),
             }),
           });
 
@@ -1618,6 +1621,8 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               mainHistoryImages.find((x) => x.id === sourceMainImageId);
             if (!oldMain) throw new Error("缺少主视图，无法刷新 main。");
 
+            const { referenceImageDataUrls, cappyCalmLockPreset } =
+              await resolveCappyCalmStep1ReferenceDataUrls(prompt, step1ReferenceImageDataUrls);
             const res = await fetch("/api/generate-main", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -1629,9 +1634,8 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
                 bananaImageModel: step2BananaImageModel,
                 fastMode: step1FastMode,
                 expansionStrength: step1ExpansionStrength,
-                ...(step1ReferenceImageDataUrls.length
-                  ? { referenceImageDataUrls: step1ReferenceImageDataUrls }
-                  : {}),
+                ...(referenceImageDataUrls.length ? { referenceImageDataUrls } : {}),
+                ...(cappyCalmLockPreset ? { cappyCalmLockPreset } : {}),
               }),
             });
 

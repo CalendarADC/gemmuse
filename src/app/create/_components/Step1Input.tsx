@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useJewelryGeneratorStore } from "@/store/jewelryGeneratorStore";
 import Step1FlipClock from "./Step1FlipClock";
 import Step1GenerateButton from "./Step1GenerateButton";
@@ -8,6 +8,7 @@ import { applyStep1ReferenceFromGalleryUrl } from "@/lib/ui/applyStep1ReferenceF
 import { consumeGalleryDragPayload, GALLERY_DRAG_REF_MIME } from "@/lib/ui/galleryDragPayload";
 import { STEP1_CIRCLE_BTN_BASE, step1CircleBtnClass } from "./createToolbarCircleButton";
 import ResolutionToggleIcon from "./ResolutionToggleIcon";
+import { detectCappyCalmMaterialPreset } from "@/lib/ip/cappyCalm";
 
 const MAX_REFERENCE_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_REFERENCE_IMAGE_PAYLOAD_BYTES = 900 * 1024;
@@ -253,6 +254,19 @@ export default function Step1Input() {
 
   const step1GenElapsedMs =
     step1StartedAt != null && isGenerating ? Date.now() - step1StartedAt + step1TimerTick * 0 : 0;
+
+  const cappyCalmAutoRefHint = useMemo(() => {
+    const t = prompt.trim();
+    if (!/cappy\s*calm/i.test(t)) return null;
+    const preset = detectCappyCalmMaterialPreset(t);
+    if (preset === "s925") {
+      return "Cappy Calm：已识别 925 银版本，生成时将自动附加官方角色参考图（无需手动上传）。";
+    }
+    if (preset === "brass") {
+      return "Cappy Calm：已识别黄铜版本，生成时将自动附加官方角色参考图（无需手动上传）。";
+    }
+    return "检测到 Cappy Calm：请在文案中写明「925银 / sterling / 纯银」或「黄铜 / brass」，即可自动附加对应官方参考图。";
+  }, [prompt]);
 
   useEffect(() => {
     if (!toolbarMenuOpen) return;
@@ -545,6 +559,9 @@ export default function Step1Input() {
         </div>
 
         {uploadHint ? <p className="mt-2 text-xs text-amber-700">{uploadHint}</p> : null}
+        {cappyCalmAutoRefHint ? (
+          <p className="mt-2 text-xs text-blue-800/90">{cappyCalmAutoRefHint}</p>
+        ) : null}
 
         {step1ReferenceImageDataUrls.length > 0 ? (
           <div className="mt-2 flex flex-wrap gap-2">

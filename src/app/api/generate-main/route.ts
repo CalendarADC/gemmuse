@@ -32,6 +32,7 @@ import {
 } from "@/lib/ai/jewelrySoftLimits";
 import { requireApiActiveUser } from "@/lib/apiAuth";
 import { persistGeneratedImage } from "@/lib/images/persistGeneratedImage";
+import { buildCappyCalmCharacterLockBlock } from "@/lib/ip/cappyCalm";
 import { ensureOwnedTaskId } from "@/lib/tasks/resolveTask";
 
 export const runtime = "nodejs";
@@ -53,6 +54,8 @@ type Body = {
   bananaImageModel?: "banana-pro" | "banana-2";
   /** @deprecated ??? bananaImageModel */
   step1ImageModel?: "banana-pro" | "banana-2";
+  /** 客户端已成功注入 Cappy Calm 官方参考图时附带，用于追加角色锁定文案 */
+  cappyCalmLockPreset?: "s925" | "brass";
 };
 
 const MAX_REFERENCE_DATA_URL_CHARS = 14 * 1024 * 1024;
@@ -93,6 +96,10 @@ export async function POST(req: Request) {
 
   const referenceImageDataUrls =
     fromArray.length > 0 ? fromArray : legacySingle.length > 0 ? legacySingle : [];
+
+  const lockPresetRaw = body.cappyCalmLockPreset;
+  const cappyCalmLockPreset =
+    lockPresetRaw === "brass" || lockPresetRaw === "s925" ? lockPresetRaw : null;
 
   const bananaRaw =
     typeof body.bananaImageModel === "string"
@@ -212,6 +219,10 @@ export async function POST(req: Request) {
       .filter(Boolean)
       .join("\n\n");
     const referencePreamble = buildReferenceFusionBlock(refCount, prompt);
+    const cappyCalmLock =
+      refCount > 0 && cappyCalmLockPreset
+        ? buildCappyCalmCharacterLockBlock(cappyCalmLockPreset)
+        : "";
     const systemPrompt = buildNanoBananaProStep1SystemPrompt(prompt);
 
     const productionSoftLimits = [
@@ -253,7 +264,7 @@ export async function POST(req: Request) {
     ].join("\n");
     const finalPromptCommon =
       refCount > 0
-        ? `${referencePreamble}\n\n${systemPrompt}\n\n${boostedPrompt}\n\n${etsyMainConstraints}\n\n${productionSoftLimits}${
+        ? `${referencePreamble}${cappyCalmLock ? `\n\n${cappyCalmLock}` : ""}\n\n${systemPrompt}\n\n${boostedPrompt}\n\n${etsyMainConstraints}\n\n${productionSoftLimits}${
             batchDiversity ? `\n\n${batchDiversity}` : ""
           }`
         : `${systemPrompt}\n\n${boostedPrompt}\n\n${etsyMainConstraints}\n\n${productionSoftLimits}${
