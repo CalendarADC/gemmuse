@@ -261,7 +261,8 @@ type JewelryGeneratorStore = {
   // Step2/Step3 历史记录删除
   toggleMainHistoryFavorite: (id: string) => void;
   toggleGalleryHistoryFavoriteBySelector: (selector: GalleryImageSelector) => void;
-  deleteMainHistoryImagesByIds: (ids: string[]) => void;
+  /** 成功更新本地（且云端删除成功或无需删云端）时返回 true */
+  deleteMainHistoryImagesByIds: (ids: string[]) => Promise<boolean>;
   deleteGalleryHistoryImagesBySelectors: (selectors: GalleryImageSelector[]) => void;
 
   // 从历史集合中切换到指定 setId 对应的当前集合（用于 Step4）
@@ -1825,8 +1826,42 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         }));
       },
 
-      deleteMainHistoryImagesByIds: (ids) => {
+      deleteMainHistoryImagesByIds: async (ids) => {
         const idSet = new Set(ids);
+        const snapshot = get();
+        const serverDeleteIds = ids.filter((id) => {
+          const m =
+            snapshot.mainHistoryImages.find((x) => x.id === id) ??
+            snapshot.mainImages.find((x) => x.id === id);
+          return !!m && !m.isFavorite;
+        });
+
+        if (serverDeleteIds.length) {
+          try {
+            const res = await fetch(
+              `/api/tasks/${encodeURIComponent(snapshot.activeTaskId)}/workspace/images`,
+              {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: serverDeleteIds }),
+              }
+            );
+            if (!res.ok) {
+              const data = (await res.json().catch(() => ({}))) as { message?: string };
+              set({
+                error:
+                  typeof data.message === "string"
+                    ? data.message
+                    : "云端删除主图失败，刷新后仍可能出现已删图片，请稍后再试。",
+              });
+              return false;
+            }
+          } catch {
+            set({ error: "云端删除主图失败，请检查网络后重试。" });
+            return false;
+          }
+        }
+
         set((state) => {
           const nextMainHistoryImages = state.mainHistoryImages.filter(
             (x) => x.isFavorite || !idSet.has(x.id)
@@ -1837,7 +1872,8 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           const nextSelectedMainImageIds = state.selectedMainImageIds.filter((id) => !idSet.has(id));
           const nextPrimaryId = nextSelectedMainImageIds[0] ?? null;
           const nextPrimaryImg = nextPrimaryId
-            ? nextMainImages.find((x) => x.id === nextPrimaryId) ?? nextMainHistoryImages.find((x) => x.id === nextPrimaryId)
+            ? nextMainImages.find((x) => x.id === nextPrimaryId) ??
+              nextMainHistoryImages.find((x) => x.id === nextPrimaryId)
             : null;
 
           // 删除 Step2 历史时，把对应来源的 Step3 历史也一起清掉，避免“孤儿展示图”。
@@ -1859,6 +1895,14 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             error: null,
           };
         });
+        const s2 = get();
+        if (tasksHydrated) scheduleDebouncedTaskMetaSave(s2.activeTaskId, pickTaskMeta(s2));
+        try {
+          await persistActiveWorkspace(s2);
+        } catch {
+          /* ignore */
+        }
+        return true;
       },
 
       deleteGalleryHistoryImagesBySelectors: (selectors) => {
