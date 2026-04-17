@@ -25,17 +25,18 @@ export function detectCappyCalmMaterialPreset(prompt: string): CappyCalmMaterial
   return null;
 }
 
-/** 注入到 Step1 最终 prompt，强化「第一张参考 = 角色锁定」 */
+/** 注入到 Step1 最终 prompt：仅锁定脸型轮廓、身材比例与 bail；其余跟用户文案与模型发挥 */
 export function buildCappyCalmCharacterLockBlock(preset: CappyCalmMaterialPreset): string {
   const sheet =
     preset === "s925"
       ? "first reference = official **925 sterling / oxidized silver** Cappy Calm character sheet."
       : "first reference = official **brass / warm gold-tone** Cappy Calm character sheet.";
   return [
-    "CAPPY CALM IP — CHARACTER LOCK (strict):",
+    "CAPPY CALM IP — PARTIAL LOCK (reference vs. text):",
     sheet,
-    "Match **face expression, closed-eye smile shape, snout, ear placement, fur micro-engraving direction/density, chubby body proportions, flat cap + waistcoat + cup pose, bail/hanger topology** to the reference as closely as manufacturable jewelry allows.",
-    "TEXT prompt controls **scene, surface, lighting, angle variation, and exact alloy finish**; do NOT redesign the character into a different species, face, or silhouette.",
-    "Output is still ONE pendant product hero — not a toy figure, not a statue unrelated to the reference.",
+    "LOCK to the reference (keep close): **overall face shape / muzzle silhouette**, **chubby body massing and proportions** (torso-to-head scale, limb stubbiness), and **bail / hanger topology** (loop size, placement, attachment logic to the motif).",
+    "FOLLOW the user TEXT prompt + creative latitude (not fixed by the reference): **facial expression**, **pose / action**, **clothing / props / accessories**, **scene, lighting, camera**, and **surface finish details** beyond the base alloy the user asked for.",
+    "Still a **capybara-inspired** IP pendant — do not swap species; silhouette and bail read should remain on-brand with the sheet while expression, outfit, and staging stay flexible.",
+    "Output: **one** manufacturable pendant hero, not a collage.",
   ].join("\n");
 }
