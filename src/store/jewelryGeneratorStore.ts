@@ -22,7 +22,11 @@ import {
 import {
   fetchTaskWorkspaceFromServer,
   mergeTaskWorkspaceWithServer,
+  pickLatestMainTimeCluster,
 } from "@/lib/tasks/mergeServerWorkspace";
+
+/** Step1 点击生成瞬间已有的主图 id；用于在请求挂起/刷新后从 workspace 识别「本轮」新图。 */
+let step1RecoverPreMainIdSet: ReadonlySet<string> | null = null;
 
 /** 将浏览器/Node 的 fetch 连接失败转为可读中文提示 */
 function friendlyFetchErrorMessage(e: unknown): string | undefined {
@@ -230,6 +234,8 @@ type JewelryGeneratorStore = {
 
   // Step 1: 生成主视图（成功且至少一张图时返回 true，供界面跳转 Step2）
   generateMainImages: () => Promise<boolean>;
+  /** 生成中轮询：若服务端已有本轮新主图则合并状态并返回 true（供跳转 Step2）。 */
+  recoverStep1FromServerIfComplete: () => Promise<boolean>;
   regenerateMainImage: (id: string) => Promise<void>;
 
   // Step 2: 选择主视图
@@ -1094,6 +1100,10 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         const histIdSet = new Set(prevHist.map((x) => x.id));
         // 仅归档「尚未写入历史」的当前主图，避免与成功回调里写入的历史重复
         const archiveBatch = prevMain.filter((x) => !histIdSet.has(x.id));
+        step1RecoverPreMainIdSet = new Set([
+          ...prevMain.map((x) => x.id),
+          ...prevHist.map((x) => x.id),
+        ]);
 
         set({
           error: null,
@@ -1183,8 +1193,15 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             console.warn("[GemMuse] persistActiveWorkspace failed after Step1 generate", err);
           }
           flushTaskPromptBackup(stAfter.activeTaskId, stAfter.prompt);
+          step1RecoverPreMainIdSet = null;
           return images.length > 0;
         } catch (e) {
+          const mid = get();
+          // 轮询 recover 可能已先合并服务端结果并结束 generating；此时勿用失败态覆盖已有主图。
+          if (!mid.status.step1Generating && mid.mainImages.length > 0) {
+            step1RecoverPreMainIdSet = null;
+            return true;
+          }
           const message = friendlyFetchErrorMessage(e);
           set({
             status: withStep1Generating(get().status, false),
@@ -1197,8 +1214,66 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           } catch (err) {
             console.warn("[GemMuse] persistActiveWorkspace failed after Step1 error", err);
           }
+          step1RecoverPreMainIdSet = null;
           return false;
         }
+      },
+
+      recoverStep1FromServerIfComplete: async () => {
+        const s = get();
+        if (!s.status.step1Generating || !step1RecoverPreMainIdSet) return false;
+        const taskId = s.activeTaskId;
+        const preSet = step1RecoverPreMainIdSet;
+        let loaded = await loadTaskFromIdb(taskId);
+        const serverWorkspace = await fetchTaskWorkspaceFromServer(taskId);
+        if (!serverWorkspace?.images?.length) return false;
+        loaded = mergeTaskWorkspaceWithServer(loaded, serverWorkspace);
+        const newMains = loaded.mainHistoryImages.filter((m) => !preSet.has(m.id));
+        if (!newMains.length) return false;
+        const batch = pickLatestMainTimeCluster(newMains, s.count);
+        if (!batch.length) return false;
+
+        const prompt = s.prompt;
+        const line = prompt.trim().slice(0, 160);
+        const incomingIds = new Set(batch.map((x) => x.id));
+        const historyWithoutIncoming = loaded.mainHistoryImages.filter((h) => !incomingIds.has(h.id));
+        const first = batch[0];
+        const now = new Date().toISOString();
+        set({
+          mainImages: batch,
+          mainHistoryImages: [...batch, ...historyWithoutIncoming],
+          selectedMainImageId: first?.id ?? null,
+          selectedMainImageUrl: first?.url ?? null,
+          selectedMainImageIds: first?.id ? [first.id] : [],
+          status: withStep1Generating(s.status, false),
+          error: null,
+          tasks: s.tasks.map((t) =>
+            t.id === s.activeTaskId
+              ? {
+                  ...t,
+                  updatedAt: now,
+                  currentStep: "STEP2",
+                  searchLine: line || t.searchLine,
+                  lastSuccessPrompt: prompt.trim() || t.lastSuccessPrompt,
+                }
+              : t
+          ),
+        });
+        step1RecoverPreMainIdSet = null;
+        void fetch("/api/tasks", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskId: s.activeTaskId, currentStep: "STEP2", searchLine: line }),
+        }).catch(() => undefined);
+        const stAfter = get();
+        flushDebouncedTaskMetaSave();
+        try {
+          await persistActiveWorkspace(stAfter);
+        } catch (err) {
+          console.warn("[GemMuse] persistActiveWorkspace failed after Step1 recover", err);
+        }
+        flushTaskPromptBackup(stAfter.activeTaskId, stAfter.prompt);
+        return true;
       },
 
       regenerateMainImage: async (id) => {
@@ -1752,7 +1827,9 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           const nextMainHistoryImages = state.mainHistoryImages.filter(
             (x) => x.isFavorite || !idSet.has(x.id)
           );
-          const nextMainImages = state.mainImages;
+          const nextMainImages = state.mainImages.filter(
+            (x) => x.isFavorite || !idSet.has(x.id)
+          );
           const nextSelectedMainImageIds = state.selectedMainImageIds.filter((id) => !idSet.has(id));
           const nextPrimaryId = nextSelectedMainImageIds[0] ?? null;
           const nextPrimaryImg = nextPrimaryId

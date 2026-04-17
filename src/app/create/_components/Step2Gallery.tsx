@@ -741,8 +741,23 @@ export default function Step2Gallery() {
                 variant="danger"
                 shape="full"
                 onClick={() => {
-                  deleteMainHistoryImagesByIds(confirmDeleteIds);
+                  const ids = confirmDeleteIds;
+                  const keptFavorite = ids.filter((id) =>
+                    mainHistoryImages.some((x) => x.id === id && x.isFavorite)
+                  );
+                  deleteMainHistoryImagesByIds(ids);
                   setConfirmDeleteIds(null);
+                  if (keptFavorite.length === ids.length) {
+                    emitToast({
+                      type: "info",
+                      message: "所选图片均已收藏（★），请先取消收藏后再删除。",
+                    });
+                  } else if (keptFavorite.length > 0) {
+                    emitToast({
+                      type: "info",
+                      message: `已删除可删项；另有 ${keptFavorite.length} 张因已收藏而保留。`,
+                    });
+                  }
                 }}
                 className="h-[34px] px-4 text-sm"
               >

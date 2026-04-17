@@ -139,14 +139,10 @@ function pickLatestGallerySetAsCurrent(history: GalleryImage[]): GalleryImage[] 
   return history.filter((g) => g.setId === bestSet).sort((a, b) => parseTime(a.createdAt) - parseTime(b.createdAt));
 }
 
-function resolveMainImagesPanel(
-  localPanel: MainImage[],
-  count: number,
-  mergedHistory: MainImage[]
-): MainImage[] {
-  const idSet = new Set(mergedHistory.map((m) => m.id));
-  const kept = localPanel.filter((m) => idSet.has(m.id));
-  if (kept.length) return kept;
+const MAIN_TIME_CLUSTER_MS = 180_000;
+
+/** 从主图列表中取「时间上最新的一簇」（簇内 createdAt 间隔 ≤ MAIN_TIME_CLUSTER_MS），再截断到 count。 */
+export function pickLatestMainTimeCluster(mergedHistory: MainImage[], count: number): MainImage[] {
   const n = Math.min(5, Math.max(1, Math.floor(count)));
   const asc = [...mergedHistory].sort((a, b) => parseTime(a.createdAt) - parseTime(b.createdAt));
   if (!asc.length) return [];
@@ -157,10 +153,30 @@ function resolveMainImagesPanel(
       tail.unshift(m);
       continue;
     }
-    if (parseTime(tail[0]!.createdAt) - parseTime(m.createdAt) <= 180_000) tail.unshift(m);
+    if (parseTime(tail[0]!.createdAt) - parseTime(m.createdAt) <= MAIN_TIME_CLUSTER_MS) tail.unshift(m);
     else break;
   }
   return tail.slice(-n);
+}
+
+function resolveMainImagesPanel(
+  localPanel: MainImage[],
+  count: number,
+  mergedHistory: MainImage[]
+): MainImage[] {
+  const idSet = new Set(mergedHistory.map((m) => m.id));
+  const kept = localPanel.filter((m) => idSet.has(m.id));
+  const newestPanel = pickLatestMainTimeCluster(mergedHistory, count);
+  if (kept.length) {
+    const maxKept = Math.max(0, ...kept.map((m) => parseTime(m.createdAt)));
+    const maxNewest = newestPanel.length
+      ? Math.max(...newestPanel.map((m) => parseTime(m.createdAt)))
+      : 0;
+    // 本地「当前集」仍指向旧 id，但云端/合并历史里已有更新的主图簇（例如 Step1 已在服务端落库而本页未收到 fetch 响应）时，应切到最新簇。
+    if (maxNewest > maxKept) return newestPanel;
+    return kept;
+  }
+  return newestPanel;
 }
 
 function resolveGalleryPanel(localPanel: GalleryImage[], mergedHistory: GalleryImage[]): GalleryImage[] {
