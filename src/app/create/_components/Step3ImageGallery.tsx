@@ -152,6 +152,9 @@ export default function Step3ImageGallery() {
   } = useJewelryGeneratorStore();
 
   const [viewMode, setViewMode] = useState<"current" | "history" | "favorites">("current");
+  /** 跨组拖拽/抽出条：此前误限定为仅「历史」视图，导致默认「当前」下无法操作 */
+  const step3LayoutDragEnabled =
+    viewMode === "current" || viewMode === "history" || viewMode === "favorites";
 
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
@@ -526,7 +529,7 @@ export default function Step3ImageGallery() {
   };
 
   const startArmHold = (imageKey: string) => {
-    if (viewMode !== "history") return;
+    if (!step3LayoutDragEnabled) return;
     if (armHoldTimerRef.current !== null) window.clearTimeout(armHoldTimerRef.current);
     armHoldTimerRef.current = window.setTimeout(() => {
       setArmedImageKey(imageKey);
@@ -653,7 +656,7 @@ export default function Step3ImageGallery() {
   ]);
 
   pointerDropResolverRef.current = (clientX, clientY, droppedKey, imageUrl) => {
-    if (viewMode !== "history") return;
+    if (!step3LayoutDragEnabled) return;
     const stack = document.elementsFromPoint(clientX, clientY);
     for (const raw of stack) {
       if (!(raw instanceof HTMLElement)) continue;
@@ -783,7 +786,7 @@ export default function Step3ImageGallery() {
   };
 
   const beginStep3TilePointerDrag = (e: React.PointerEvent, imageKey: string, imageUrl: string) => {
-    if (viewMode !== "history" || e.pointerType === "touch") return;
+    if (!step3LayoutDragEnabled || e.pointerType === "touch") return;
     if (e.button !== 0) return;
     const tgt = e.target as HTMLElement | null;
     if (tgt?.closest("button")) return;
@@ -1003,7 +1006,7 @@ export default function Step3ImageGallery() {
           <div
             className={[
               "grid grid-cols-1 gap-4 lg:grid-cols-2",
-              viewMode === "history" && draggingImageKey
+              step3LayoutDragEnabled && draggingImageKey
                 ? "rounded-2xl border-2 border-dashed border-[#5E6F82]/25 p-2"
                 : "",
             ].join(" ")}
@@ -1040,7 +1043,7 @@ export default function Step3ImageGallery() {
                   className={[
                     "relative overflow-hidden rounded-2xl border border-[rgba(94,111,130,0.15)] bg-white/90",
                     "transition-all duration-200 ease-out",
-                    viewMode === "history" && armedImageKey === imageKey ? "ring-2 ring-[#5E6F82] shadow-lg" : "",
+                    step3LayoutDragEnabled && armedImageKey === imageKey ? "ring-2 ring-[#5E6F82] shadow-lg" : "",
                     compact ? "shadow-sm hover:-translate-y-1 hover:shadow-md" : "shadow-sm hover:-translate-y-0.5 hover:shadow-md",
                   ].join(" ")}
                   onClick={() => openPreview(imageKey)}
@@ -1200,7 +1203,7 @@ export default function Step3ImageGallery() {
                       data-step3-hero-drop={g.key}
                       className={[
                         "rounded-2xl",
-                        viewMode === "history" && heroDropTargetGroupKey === g.key ? "ring-2 ring-[#5E6F82]/35" : "",
+                        step3LayoutDragEnabled && heroDropTargetGroupKey === g.key ? "ring-2 ring-[#5E6F82]/35" : "",
                       ].join(" ")}
                     >
                       {renderTile(g.displayHero, false)}
@@ -1209,7 +1212,7 @@ export default function Step3ImageGallery() {
                       data-step3-thumb-col-drop={g.key}
                       className={[
                         "rounded-xl p-1",
-                        viewMode === "history" && dropTargetGroupKey === g.key
+                        step3LayoutDragEnabled && dropTargetGroupKey === g.key
                           ? "bg-[#5E6F82]/8 ring-2 ring-[#5E6F82]/35"
                           : "",
                       ].join(" ")}
@@ -1225,7 +1228,7 @@ export default function Step3ImageGallery() {
                                   key={key}
                                   className={[
                                     "relative cursor-pointer rounded-xl border border-[rgba(94,111,130,0.16)] bg-white/95 shadow-sm transition-all duration-200 ease-out hover:-translate-y-2.5 hover:scale-[1.035] hover:shadow-lg",
-                                    viewMode === "history" && armedImageKey === key ? "ring-2 ring-[#5E6F82] shadow-lg" : "",
+                                    step3LayoutDragEnabled && armedImageKey === key ? "ring-2 ring-[#5E6F82] shadow-lg" : "",
                                   ].join(" ")}
                                   onClick={() => openPreview(key)}
                                   onMouseEnter={() => armExtractPreview(key)}
@@ -1302,7 +1305,7 @@ export default function Step3ImageGallery() {
                                       isHovered || isExtracted || distance <= 2
                                         ? "shadow-lg ring-1 ring-[#5E6F82]/25"
                                         : "",
-                                      viewMode === "history" && armedImageKey === key ? "ring-2 ring-[#5E6F82] shadow-lg" : "",
+                                      step3LayoutDragEnabled && armedImageKey === key ? "ring-2 ring-[#5E6F82] shadow-lg" : "",
                                     ].join(" ")}
                                     style={{
                                       top,
@@ -1356,7 +1359,7 @@ export default function Step3ImageGallery() {
                       ) : null}
                     </div>
                   </div>
-                  {viewMode === "history" && g.movedIn.length > 0 ? (
+                  {step3LayoutDragEnabled && g.movedIn.length > 0 ? (
                     <div className="mt-2 flex justify-end">
                       <button
                         type="button"
@@ -1377,7 +1380,7 @@ export default function Step3ImageGallery() {
               );
             })}
           </div>
-          {viewMode === "history" && draggingImageKey ? (
+          {step3LayoutDragEnabled && draggingImageKey ? (
             <div
               className={[
                 "pointer-events-none sticky bottom-3 z-20 mt-2 flex",
