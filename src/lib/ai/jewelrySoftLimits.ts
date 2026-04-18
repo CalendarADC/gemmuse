@@ -6,17 +6,27 @@
 export type JewelryProductKind = "ring" | "pendant";
 export type PromptExpansionStrength = "standard" | "strong";
 
-/** 与 generate-main 一致：含吊坠/项链语义时按 pendant，否则 ring */
+/**
+ * 与 generate-main / Step3 enhance 一致：
+ * - 先判吊坠/项链类与常见 IP 吊坠（避免无「吊坠」字样时被误判为 ring 而挂上戒指角度参考图）。
+ * - 再判戒指类关键词。
+ * - 均无时默认 pendant（保守：误用戒指机位板比漏用 ring 软约束更严重）。
+ */
 export function inferJewelryProductKind(prompt: string): JewelryProductKind {
-  const pl = prompt.toLowerCase();
-  if (
-    /(pendant|necklace|charm|bail|hanging loop|hanger|locket|amulet|chain|链条|吊坠|项链)/.test(
+  const pl = prompt.trim().toLowerCase();
+  if (!pl) return "pendant";
+
+  const pendantCue =
+    /(pendant|necklace|charm|bail|hanging loop|hanger|locket|amulet|chain|链条|吊坠|项链|吊饰|挂坠|cappy\s*calm|卡皮巴拉|\bcapybara\b)/i.test(
       pl
-    )
-  ) {
-    return "pendant";
-  }
-  return "ring";
+    );
+
+  const ringCue =
+    /(\bring\b|rings|戒指|指环|戒圈|戒托|婚戒|对戒|戒臂|戒面|女戒|男戒|钻戒|尾戒|扳指)/i.test(pl);
+
+  if (pendantCue) return "pendant";
+  if (ringCue) return "ring";
+  return "pendant";
 }
 
 /**

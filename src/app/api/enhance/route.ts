@@ -52,6 +52,8 @@ const RING_DUAL_REF_PREAMBLE = [
   "**Second** inline image = GemMuse **canonical camera-angle plate** for this output type (studio rabbit-ring reference pack).",
   "Copy from plate 2 **only** lens grammar: azimuth, elevation (about 30-45 degrees above horizontal, slight high-angle product style), crop tightness, and how much band vs top motif appears in frame.",
   "Do **not** transplant the plate's exact sculpt if it conflicts with image 1; all jewelry identity and topology stay locked to image 1.",
+  "FORBID: reproducing image 2's **species / face / stone layout / band engraving / SKU** as the output — image 2 is **not** a design target, only a **camera recipe**.",
+  "The output must depict **only** the ring from image 1 at the requested angle; never swap in the rabbit reference as the product.",
 ].join("\n");
 
 function withEnhanceSoftLimits(
