@@ -335,7 +335,7 @@ export async function POST(req: Request) {
               step3UserTextSecondaryBlock(prompt),
             ]
           : [
-              `[SHOT_KIND: ON_MODEL_WEARING — request ${runNonce}_wear] You MUST output a **neck/worn** crop with the **pendant on chain or cord visible as worn**, **NOT** a second flat tabletop duplicate of the init hero.",
+              `[SHOT_KIND: ON_MODEL_WEARING — request ${runNonce}_wear] You MUST output a **neck/worn** crop with the **pendant on chain or cord visible as worn**, **NOT** a second flat tabletop duplicate of the init hero.`,
               "COLOR / GRADE HARMONY: keep **pendant metal and stone hues** consistent with the init reference.",
               step3InputImageSovereigntyBlock(),
               baseKeepInstruction,
@@ -352,7 +352,7 @@ export async function POST(req: Request) {
         true
       );
 
-      const debugPromptZh = `?????????\n??????${prompt}\n\n${editPrompt}`;
+      const debugPromptZh = `穿戴图 / On-model\n用户 prompt：${prompt}\n\n${editPrompt}`;
 
       await runOneShot(async () => {
         const base64 = await laoZhangImageToImage({
