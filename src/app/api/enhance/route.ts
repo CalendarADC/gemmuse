@@ -85,7 +85,7 @@ function step3PendantBailTopologyLockBlock(): string {
     "The init image defines a **bail** (or jump ring / top hanger) attached above the motif. This is **mandatory manufacturing geometry**, not an optional flourish.",
     "Left/right/rear/front table shots: you **must still render that bail as solid metal** ? seen from the side, three-quarter, or back as appropriate. A partially hidden bail behind the head is OK; **a completely missing bail, bail absorbed into the outer filigree halo, or a sealed decorative disk with no through-opening** is NOT OK.",
     "Keep the **same attachment junction and similar loop scale** as the source; do not delete the top loop to simplify a lying-on-side silhouette.",
-    "NO VISIBLE CHAIN ? GRAVITY (table / product shots): if the init shows **no necklace chain**, preserve **physically plausible bail pose** ? resting / tilted / leaning on the motif under gravity (like a loose loop on a cushion). **FORBID** converting it into a rigid vertical bail **floating** with an air gap as if pulled by an invisible chain.",
+    "NO VISIBLE CHAIN ? CAD UPRIGHT BAIL (table / product shots): if the init shows **no necklace chain**, render the bail / jump ring **upright / plumb** along the stringing axis **as if tensioned from above** by a chain that is **implied only** ? **never draw chain links or cord**. **FORBID** a **slack / draped** bail collapsed on the motif like gravity-loose dead weight. **FORBID** a bail **floating** with broken attachment to the topper.",
   ].join("\n");
 }
 
@@ -293,7 +293,8 @@ export async function POST(req: Request) {
             "Rotate the viewpoint strongly to the requested side into a **three-quarter oblique side shot** (good reference: leopard/lion head pendant on velvet ? seen from above-side so you read snout/jaw **profile**, cheek plane, **metal thickness**, filigree depth, and the **bail loop from an angle** with its opening visible).",
             "REQUIRE obvious **lateral information**: at least two of ? side profile of head/muzzle, flank relief, asymmetric ear/mane read, bail seen from the side, visible back vs front plane separation.",
             "BAIL NON-NEGOTIABLE (side view): the **bail must remain a separate metal loop/volume** attached at the top (or same azimuth as the source), readable in side or 3/4 ? **never cropped off, never merged into the scalloped border, never deleted for a cleaner profile**.",
-            "REST ON SURFACE (strict): same display fabric/tray as main image; pendant **lies** on it with weight ? contact shadows, slight cloth compression; FORBID floating, zero contact, or bolt-upright statue pose.",
+            "BAIL ORIENTATION (no chain in frame): bail / jump ring reads **upright / vertically tensioned** (implied overhead chain pull) for CAD stringing clarity ? **still render zero chain**.",
+            "REST ON SURFACE (strict): same display fabric/tray as main image; **pendant body** **lies** on it with weight ? contact shadows, slight cloth compression. **Top bail** keeps the **upright chain-pull** read (no chain drawn). FORBID the **whole jewel** levitating with zero surface contact; FORBID a bolt-upright **statue** pose of the entire body if the main was a lying tabletop hero.",
             "LYING POSE + CAMERA (strict): velvet/table pose is allowed, but the **camera must still sight the same outer convex hero relief** as the init, from a **left/right azimuth** ? **FORBID** arranging the piece so the **hollow molded reverse / concave back impression** faces the lens (that reads as wrong rear, not side).",
             "FORBID: repeating the same frontal framing as the input; symmetric front mascot pose when the brief is left/right view.",
           ].join("\n")
