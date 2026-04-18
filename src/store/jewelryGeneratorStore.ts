@@ -1451,6 +1451,11 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           mainHistoryImages,
         } = get();
 
+        if (get().status.step3Generating) {
+          set({ error: "展示图生成进行中，请等待当前任务完成后再试。" });
+          return false;
+        }
+
         if (!selectedMainImageIds.length) {
           set({ error: "请先在 Step 2 选择至少一张主视图。" });
           return false;

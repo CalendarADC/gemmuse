@@ -274,11 +274,23 @@ export async function POST(req: Request) {
         ? [
             "RING ? LEFT/RIGHT CAMERA (critical ? NOT a frontal reshoot):",
             "The init is often a **frontal or three-quarter hero** on a surface. You must **orbit the camera ~60?120?* around the jewelry's **vertical axis** (through the finger hole toward the viewer) to the requested **LEFT or RIGHT** side of the set ? **NOT** a zero-degree re-render with only polish/specular/gem tweaks.",
+            "RING SIDE ? NOT TOP-DOWN / NOT CLONE FRONT (critical): **FORBID** a bird's-eye / plan / table shot where the band reads as a **perfect symmetric oval or circle identical to the init framing** with only tiny lighting shifts. The shank must read **narrower in one dimension** (band going partially edge-on) OR the head/stones must show **clear 3/4 or profile asymmetry** vs the hero.",
             "**SUCCESS CHECK**: if the ring's **principal viewing bearing** and band ellipse read **the same** as the init (same hero angle with a 'refresh'), you **failed** ? increase lateral orbit until **asymmetric** cues dominate.",
             "**REQUIRE** at least **two** of: (a) **shank/band ellipse skew** ? one side reads clearly narrower, the other wider vs init; (b) **gallery wall or prong row** asymmetrically dominant on the near side; (c) **figural tops**: snout/cheek/jaw **favors one camera side** in clear profile or strong 3/4; (d) **main stone table/crown** seen from a **visibly different tangent** (facet pattern not a copy of the hero).",
             "Stay on the **same convex outer sculpted skin** as the hero ? **FORBID** the face reading as a **concave hollow mold / negative impression** toward the lens (wrong flip, not lateral orbit).",
             "Show **band thickness, stone profile, setting wall** from the requested orbit; **FORBID** another **identical straight-on front** duplicate.",
             "FORBID: a **back-only** shot that hides the primary stone/face (only inner shank/sizing) when the brief is left/right ? lateral orbit, not hiding the top.",
+          ].join("\n")
+        : "";
+
+    const ringRearViewFullBlock =
+      kind === "ring"
+        ? [
+            "RING ? REAR / BACK VIEW (critical ? NOT another table-top hero):",
+            "The init is usually a **table / slightly elevated front or 3/4 hero** showing the top plane of the motif and stones. THIS output must show the **true rear / back of the piece**: back of gallery or bezel, under-gallery struts, closed back plate, inner shank hallmarks, sizing bar, or spring seats as appropriate.",
+            "**FORBID** an image that still reads as the **same primary face / stone table toward the camera** as the init (second front hero with only polish or glare changes). If the animal face or crown still **squarely faces the lens** like the main shot, you **failed**.",
+            "**REQUIRE** camera to favor **normals pointing away from the original front** (roughly 120?180?from the hero viewing direction): rear metal, backs of prongs, and believable back-of-motif geometry readable; the top motif may be partly occluded or seen from behind.",
+            "Keep identical design and stone count; do not invent a new character ? only reveal legitimate rear geometry.",
           ].join("\n")
         : "";
 
@@ -472,6 +484,7 @@ export async function POST(req: Request) {
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           pendantBailLock,
+          ringRearViewFullBlock,
           "Generate a REAR / BACK view of the jewelry: show the back of the setting, rear of bail (for pendants), clasp back, or inner/back surfaces as appropriate?still as a clean studio product shot.",
           kind === "pendant"
             ? "PENDANT REAR PRIORITY: treat this as **industrial geometry completion** — the reverse must read as a **designed CAD back** with depth, not a blank polished slab."

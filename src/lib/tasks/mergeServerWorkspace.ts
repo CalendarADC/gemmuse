@@ -105,7 +105,9 @@ function enrichServerGalleryWithSets(gallery: GalleryImage[], mains: MainImage[]
     const slice = sorted.slice(i, j);
     const setId = `cloud_${sid || "na"}_${t0}_${clusterIdx++}`;
     const setCreatedAt = slice[0]?.createdAt ?? new Date(t0).toISOString();
-    if (main?.url) {
+    // Step3 已在接口里写入 type=main 时，切勿再注入合成 main；否则每次 sync 会多一条同 URL 的「主图」，历史里出现多组重复大卡。
+    const sliceAlreadyHasMain = slice.some((g) => g.type === "main");
+    if (main?.url && !sliceAlreadyHasMain) {
       out.push({
         id: `cloud_inject_main_${setId}`,
         type: "main",
