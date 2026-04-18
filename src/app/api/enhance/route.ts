@@ -27,8 +27,8 @@ import { ensureOwnedTaskId } from "@/lib/tasks/resolveTask";
 
 export const runtime = "nodejs";
 
-/** GemMuse 戒指正视/左/右官方机位样板（兔子戒指实拍），用于 img2img 第二参考图锁定镜头关系 */
-type RingHeroCanonAngle = "front" | "left" | "right";
+/** GemMuse 戒指正视/左/右/后官方机位样板（兔子戒指实拍），用于 img2img 第二参考图锁定镜头关系 */
+type RingHeroCanonAngle = "front" | "left" | "right" | "rear";
 
 async function loadRingCanonAngleRefDataUrl(which: RingHeroCanonAngle): Promise<string | null> {
   try {
@@ -339,11 +339,13 @@ export async function POST(req: Request) {
     let ringCanonFront: string | null = null;
     let ringCanonLeft: string | null = null;
     let ringCanonRight: string | null = null;
-    if (kind === "ring" && (left || right || front)) {
-      [ringCanonFront, ringCanonLeft, ringCanonRight] = await Promise.all([
+    let ringCanonRear: string | null = null;
+    if (kind === "ring" && (left || right || front || rear)) {
+      [ringCanonFront, ringCanonLeft, ringCanonRight, ringCanonRear] = await Promise.all([
         loadRingCanonAngleRefDataUrl("front"),
         loadRingCanonAngleRefDataUrl("left"),
         loadRingCanonAngleRefDataUrl("right"),
+        loadRingCanonAngleRefDataUrl("rear"),
       ]);
     }
 
@@ -545,9 +547,14 @@ export async function POST(req: Request) {
         : "";
 
     if (rear) {
+      const ringChart = kind === "ring" ? ringCanonRear : null;
+      const chartNote = ringChart
+        ? `${RING_DUAL_REF_PREAMBLE}\n\nCHART NOTE: image 2 = GemMuse canonical **REAR / back** ring shot (reference pack); replicate **camera behind the piece, slight high-angle (~40-50deg) toward the back of the motif and shank**, framing and crop relative to the subject in image 1.`
+        : "";
       const editPrompt = withEnhanceSoftLimits(
         prompt,
         [
+          ...(chartNote ? [chartNote] : []),
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           pendantBailLock,
@@ -568,14 +575,22 @@ export async function POST(req: Request) {
         false
       );
 
-      const debugPromptZh = `?????????\n??????${prompt}\n\n${editPrompt}`;
+      const debugPromptZh = `后视图 / Rear view\n用户 prompt：${prompt}\n\n${editPrompt}`;
+
+      const imgPromise = ringChart
+        ? laoZhangImagesToImage({
+            initImageDataUrls: [resolvedMainImageUrl, ringChart],
+            prompt: editPrompt,
+            ...sharedImgArgs,
+          })
+        : laoZhangImageToImage({
+            initImageDataUrl: resolvedMainImageUrl,
+            prompt: editPrompt,
+            ...sharedImgArgs,
+          });
 
       jobs.push(
-        laoZhangImageToImage({
-          initImageDataUrl: resolvedMainImageUrl,
-          prompt: editPrompt,
-          ...sharedImgArgs,
-        }).then(async (base64) => {
+        imgPromise.then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
             taskId: taskIdForPersist,
