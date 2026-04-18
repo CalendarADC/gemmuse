@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
-import { useJewelryGeneratorStore } from "@/store/jewelryGeneratorStore";
+import { useJewelryGeneratorStore, type GalleryImage } from "@/store/jewelryGeneratorStore";
 import ImagePreviewModal from "./ImagePreviewModal";
 import BrandButton from "./BrandButton";
 import { emitToast } from "@/lib/ui/toast";
@@ -118,6 +118,63 @@ function getImageInstanceKey(img: {
     img.createdAt ?? "",
     urlSig,
   ].join("::");
+}
+
+function parseGalleryTime(iso?: string): number {
+  if (!iso) return 0;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * 无 setId 时若统一用 `no_set::sourceMainImageId`，同一主图下所有 Step3 历史会并成一组，
+ * 侧栏出现大量叠在一起的缩略图（看起来像「重复生成」）。
+ * 按时间排序，以新的 `main` 卡片作为一批次的起点拆分 legacy 组键。
+ */
+function missingSetIdGroupFullKeyByInstanceKey(images: GalleryImage[]): Map<string, string> {
+  const out = new Map<string, string>();
+  const noSet = images.filter((x) => !x.setId || !String(x.setId).trim());
+  if (!noSet.length) return out;
+
+  const sorted = [...noSet].sort(
+    (a, b) => parseGalleryTime(a.createdAt) - parseGalleryTime(b.createdAt)
+  );
+
+  let seq = 0;
+  let batch: GalleryImage[] = [];
+  const flush = () => {
+    if (!batch.length) return;
+    const first = batch[0]!;
+    const root = `legacy_${first.sourceMainImageId}_${parseGalleryTime(first.createdAt)}_${seq}`;
+    const fullKey = `${root}::${first.sourceMainImageId}`;
+    for (const im of batch) {
+      out.set(getImageInstanceKey(im), fullKey);
+    }
+    seq += 1;
+    batch = [];
+  };
+
+  for (const img of sorted) {
+    if (img.type === "main" && batch.length > 0) {
+      flush();
+    }
+    batch.push(img);
+  }
+  flush();
+  return out;
+}
+
+function step3DisplayGroupKey(
+  img: GalleryImage,
+  legacyGroupFullByInstanceKey: Map<string, string>
+): string {
+  if (img.setId && String(img.setId).trim()) {
+    return `${img.setId}::${img.sourceMainImageId}`;
+  }
+  return (
+    legacyGroupFullByInstanceKey.get(getImageInstanceKey(img)) ??
+    `legacy_orphan::${img.id}::${img.sourceMainImageId}`
+  );
 }
 
 async function buildThumbDataUrl(src: string, maxW = 220, quality = 0.72): Promise<string> {
@@ -549,12 +606,16 @@ export default function Step3ImageGallery() {
     }
   };
 
-  const originalGroupKeyByImageKey = useMemo(() => {
-    const map: Record<string, string> = {};
+  const step3GroupKeyContext = useMemo(() => {
+    const legacyGroupFullByInstanceKey = missingSetIdGroupFullKeyByInstanceKey(displayImages);
+    const originalGroupKeyByImageKey: Record<string, string> = {};
     for (const img of displayImages) {
-      map[getImageInstanceKey(img)] = `${img.setId ?? "no_set"}::${img.sourceMainImageId}`;
+      originalGroupKeyByImageKey[getImageInstanceKey(img)] = step3DisplayGroupKey(
+        img,
+        legacyGroupFullByInstanceKey
+      );
     }
-    return map;
+    return { legacyGroupFullByInstanceKey, originalGroupKeyByImageKey };
   }, [displayImages]);
 
   const detachedGroupKeyFor = (imageKey: string) => `detached::${imageKey}`;
@@ -572,7 +633,7 @@ export default function Step3ImageGallery() {
     };
     const map = new Map<string, { key: string; images: typeof displayImages }>();
     for (const img of displayImages) {
-      const key = `${img.setId ?? "no_set"}::${img.sourceMainImageId}`;
+      const key = step3DisplayGroupKey(img, step3GroupKeyContext.legacyGroupFullByInstanceKey);
       if (movedImageTargetGroupByKey[getImageInstanceKey(img)]) continue;
       const found = map.get(key);
       if (found) found.images.push(img);
@@ -595,7 +656,8 @@ export default function Step3ImageGallery() {
       const candidateKey = heroOverrideByGroupKey[g.key];
       const candidateBelongsToGroup =
         !!candidateKey &&
-        (originalGroupKeyByImageKey[candidateKey] === g.key || movedImageTargetGroupByKey[candidateKey] === g.key);
+        (step3GroupKeyContext.originalGroupKeyByImageKey[candidateKey] === g.key ||
+          movedImageTargetGroupByKey[candidateKey] === g.key);
       const candidate = candidateBelongsToGroup && candidateKey ? imageByKey[candidateKey] : null;
       const displayHero = candidate ?? g.hero;
       const displayThumbsRaw = [g.hero, ...g.thumbs, ...movedIn].filter(
@@ -649,7 +711,7 @@ export default function Step3ImageGallery() {
     imageByKey,
     movedImageTargetGroupByKey,
     heroOverrideByGroupKey,
-    originalGroupKeyByImageKey,
+    step3GroupKeyContext,
     detachedHeroKeys,
     detachedInsertMetaByGroupKey,
     thumbOrderByGroupKey,
@@ -672,7 +734,7 @@ export default function Step3ImageGallery() {
 
       if (el.closest("[data-step3-extract-rail]")) {
         const sourceGroupKey =
-          movedImageTargetGroupByKey[droppedKey] ?? originalGroupKeyByImageKey[droppedKey];
+          movedImageTargetGroupByKey[droppedKey] ?? step3GroupKeyContext.originalGroupKeyByImageKey[droppedKey];
         if (!sourceGroupKey) continue;
         const side = clientX < window.innerWidth / 2 ? "left" : "right";
         const detachedKey = detachedGroupKeyFor(droppedKey);
@@ -751,7 +813,7 @@ export default function Step3ImageGallery() {
           ...g.movedIn.map((x) => getImageInstanceKey(x)),
         ]);
         if (existing.has(droppedKey)) continue;
-        const sourceKey = originalGroupKeyByImageKey[droppedKey];
+        const sourceKey = step3GroupKeyContext.originalGroupKeyByImageKey[droppedKey];
         const currentTarget = movedImageTargetGroupByKey[droppedKey] ?? sourceKey;
         if (currentTarget === g.key) continue;
         if (sourceKey === g.key) {
