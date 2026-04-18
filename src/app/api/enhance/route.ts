@@ -198,7 +198,10 @@ export async function POST(req: Request) {
       "IMAGE EDIT ONLY: Preserve the init image design bit-for-bit intent ? zero redesign. Same silhouette, same motif, same stones, same metal finish; only apply the requested camera/environment change.";
     // Step3 ???????????????? Step1 ????????????
     const keepMainBackgroundInstruction =
-      "BACKGROUND CONSISTENCY (strict): keep the exact same background style/color/lighting setup as the input main image; only change viewing angle. Do NOT replace with a new scene or different backdrop.";
+      [
+        "BACKGROUND CONSISTENCY (strict): keep the exact same background style/color/lighting setup as the input main image; only change viewing angle. Do NOT replace with a new scene or different backdrop.",
+        "If the init shows a **jewelry cushion / velvet / fabric tray**, preserve **the same hue family and texture scale** (e.g. warm beige stays warm beige) ? do NOT jump to unrelated gray seamless, blue-gray sweep, or a different wood tone.",
+      ].join("\n");
     const strictFrontViewInstruction = [
       "FRONT VIEW HARD CONSTRAINTS (strict):",
       "- Camera angle: lens must be perpendicular to the pendant/ring front plane (true orthographic-like frontal capture). No tilt, no roll, no yaw perspective; NOT 45-degree view, NOT top-down, NOT bottom-up.",
@@ -274,6 +277,7 @@ export async function POST(req: Request) {
       kind === "ring"
         ? [
             "RING ? LEFT/RIGHT CAMERA (critical ? NOT a frontal reshoot):",
+            "Treat **LEFT vs RIGHT as OPPOSITE camera positions** (not interchangeable): **LEFT** = camera has moved to the **subject's physical left** (counterclockwise in top view); **RIGHT** = camera to the **subject's physical right** (clockwise). The frame must **not** mirror the other side's composition.",
             "The init is often a **frontal or three-quarter hero** on a surface. You must **orbit the camera ~60?120?* around the jewelry's **vertical axis** (through the finger hole toward the viewer) to the requested **LEFT or RIGHT** side of the set ? **NOT** a zero-degree re-render with only polish/specular/gem tweaks.",
             "RING SIDE ? NOT TOP-DOWN / NOT CLONE FRONT (critical): **FORBID** a bird's-eye / plan / table shot where the band reads as a **perfect symmetric oval or circle identical to the init framing** with only tiny lighting shifts. The shank must read **narrower in one dimension** (band going partially edge-on) OR the head/stones must show **clear 3/4 or profile asymmetry** vs the hero.",
             "**SUCCESS CHECK**: if the ring's **principal viewing bearing** and band ellipse read **the same** as the init (same hero angle with a 'refresh'), you **failed** ? increase lateral orbit until **asymmetric** cues dominate.",
@@ -305,12 +309,17 @@ export async function POST(req: Request) {
           ].join("\n")
         : "";
 
-    const jobs: Array<Promise<GalleryImage>> = [];
+    /** 同一张 init 并发多路 img2img 时，部分上游易出现近似重复输出；顺序执行 + 明确 SHOT_KIND 降低串视角风险。 */
+    const runOneShot = async (shot: () => Promise<GalleryImage>) => {
+      images.push(await shot());
+    };
 
     if (onModel) {
       const onModelLines =
         kind === "ring"
           ? [
+              `[SHOT_KIND: ON_MODEL_WEARING — request ${runNonce}_wear] You MUST output a **hand-worn** studio photo (fingers + ring), **NOT** another identical tabletop frontal duplicate of the init.`,
+              "COLOR / GRADE HARMONY: match the **metal warmth and overall color grade** of the init hero (same alloy read); background may be clean studio but must **not** invent a totally unrelated mood that makes the ring read as a different SKU.",
               step3InputImageSovereigntyBlock(),
               baseKeepInstruction,
               "Generate an on-model shot where the ring is worn on a human hand in a studio product photography style.",
@@ -326,6 +335,8 @@ export async function POST(req: Request) {
               step3UserTextSecondaryBlock(prompt),
             ]
           : [
+              `[SHOT_KIND: ON_MODEL_WEARING — request ${runNonce}_wear] You MUST output a **neck/worn** crop with the **pendant on chain or cord visible as worn**, **NOT** a second flat tabletop duplicate of the init hero.",
+              "COLOR / GRADE HARMONY: keep **pendant metal and stone hues** consistent with the init reference.",
               step3InputImageSovereigntyBlock(),
               baseKeepInstruction,
               pendantBailLock,
@@ -343,36 +354,36 @@ export async function POST(req: Request) {
 
       const debugPromptZh = `?????????\n??????${prompt}\n\n${editPrompt}`;
 
-      jobs.push(
-        laoZhangImageToImage({
+      await runOneShot(async () => {
+        const base64 = await laoZhangImageToImage({
           initImageDataUrl: resolvedMainImageUrl,
           prompt: editPrompt,
           ...sharedImgArgs,
-        }).then(async (base64) => {
-          const persisted = await persistGeneratedImage({
-            userId: authz.user.id,
-            taskId: taskIdForPersist,
-            kind: "on_model",
-            base64,
-            sourceMainImageId: selectedMainImageId,
-            debugPromptZh,
-            keyPrefix: `users/${authz.user.id}/step3/on_model`,
-          });
-          return makeGalleryImage({
-            id: persisted.id,
-            type: "on_model",
-            url: persisted.url,
-            sourceMainImageId: selectedMainImageId,
-            debugPromptZh,
-          });
-        })
-      );
+        });
+        const persisted = await persistGeneratedImage({
+          userId: authz.user.id,
+          taskId: taskIdForPersist,
+          kind: "on_model",
+          base64,
+          sourceMainImageId: selectedMainImageId,
+          debugPromptZh,
+          keyPrefix: `users/${authz.user.id}/step3/on_model`,
+        });
+        return makeGalleryImage({
+          id: persisted.id,
+          type: "on_model",
+          url: persisted.url,
+          sourceMainImageId: selectedMainImageId,
+          debugPromptZh,
+        });
+      });
     }
 
     if (left) {
       const editPrompt = withEnhanceSoftLimits(
         prompt,
         [
+          `[SHOT_KIND: PRODUCT_LEFT_ORBIT — request ${runNonce}_L] Camera is on the jewelry's **physical LEFT** (counterclockwise from top). This is **NOT** a RIGHT-side shot; do **NOT** mirror a right-orbit composition.`,
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           step3LeftRightGemstoneColorLockBlock(),
@@ -395,36 +406,36 @@ export async function POST(req: Request) {
 
       const debugPromptZh = `左侧视图 / Left view\n用户 prompt：${prompt}\n\n${editPrompt}`;
 
-      jobs.push(
-        laoZhangImageToImage({
+      await runOneShot(async () => {
+        const base64 = await laoZhangImageToImage({
           initImageDataUrl: resolvedMainImageUrl,
           prompt: editPrompt,
           ...sharedImgArgsLeftRight,
-        }).then(async (base64) => {
-          const persisted = await persistGeneratedImage({
-            userId: authz.user.id,
-            taskId: taskIdForPersist,
-            kind: "left",
-            base64,
-            sourceMainImageId: selectedMainImageId,
-            debugPromptZh,
-            keyPrefix: `users/${authz.user.id}/step3/left`,
-          });
-          return makeGalleryImage({
-            id: persisted.id,
-            type: "left",
-            url: persisted.url,
-            sourceMainImageId: selectedMainImageId,
-            debugPromptZh,
-          });
-        })
-      );
+        });
+        const persisted = await persistGeneratedImage({
+          userId: authz.user.id,
+          taskId: taskIdForPersist,
+          kind: "left",
+          base64,
+          sourceMainImageId: selectedMainImageId,
+          debugPromptZh,
+          keyPrefix: `users/${authz.user.id}/step3/left`,
+        });
+        return makeGalleryImage({
+          id: persisted.id,
+          type: "left",
+          url: persisted.url,
+          sourceMainImageId: selectedMainImageId,
+          debugPromptZh,
+        });
+      });
     }
 
     if (right) {
       const editPrompt = withEnhanceSoftLimits(
         prompt,
         [
+          `[SHOT_KIND: PRODUCT_RIGHT_ORBIT — request ${runNonce}_R] Camera is on the jewelry's **physical RIGHT** (clockwise from top). This is **NOT** a LEFT-side shot; do **NOT** reuse a left-orbit composition.`,
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           step3LeftRightGemstoneColorLockBlock(),
@@ -447,30 +458,29 @@ export async function POST(req: Request) {
 
       const debugPromptZh = `右侧视图 / Right view\n用户 prompt：${prompt}\n\n${editPrompt}`;
 
-      jobs.push(
-        laoZhangImageToImage({
+      await runOneShot(async () => {
+        const base64 = await laoZhangImageToImage({
           initImageDataUrl: resolvedMainImageUrl,
           prompt: editPrompt,
           ...sharedImgArgsLeftRight,
-        }).then(async (base64) => {
-          const persisted = await persistGeneratedImage({
-            userId: authz.user.id,
-            taskId: taskIdForPersist,
-            kind: "right",
-            base64,
-            sourceMainImageId: selectedMainImageId,
-            debugPromptZh,
-            keyPrefix: `users/${authz.user.id}/step3/right`,
-          });
-          return makeGalleryImage({
-            id: persisted.id,
-            type: "right",
-            url: persisted.url,
-            sourceMainImageId: selectedMainImageId,
-            debugPromptZh,
-          });
-        })
-      );
+        });
+        const persisted = await persistGeneratedImage({
+          userId: authz.user.id,
+          taskId: taskIdForPersist,
+          kind: "right",
+          base64,
+          sourceMainImageId: selectedMainImageId,
+          debugPromptZh,
+          keyPrefix: `users/${authz.user.id}/step3/right`,
+        });
+        return makeGalleryImage({
+          id: persisted.id,
+          type: "right",
+          url: persisted.url,
+          sourceMainImageId: selectedMainImageId,
+          debugPromptZh,
+        });
+      });
     }
 
     const pendantRearIndustrialGeometryBlock =
@@ -482,6 +492,7 @@ export async function POST(req: Request) {
       const editPrompt = withEnhanceSoftLimits(
         prompt,
         [
+          `[SHOT_KIND: PRODUCT_REAR — request ${runNonce}_B]`,
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           pendantBailLock,
@@ -504,36 +515,36 @@ export async function POST(req: Request) {
 
       const debugPromptZh = `后视图 / Rear view\n用户 prompt：${prompt}\n\n${editPrompt}`;
 
-      jobs.push(
-        laoZhangImageToImage({
+      await runOneShot(async () => {
+        const base64 = await laoZhangImageToImage({
           initImageDataUrl: resolvedMainImageUrl,
           prompt: editPrompt,
           ...sharedImgArgs,
-        }).then(async (base64) => {
-          const persisted = await persistGeneratedImage({
-            userId: authz.user.id,
-            taskId: taskIdForPersist,
-            kind: "rear",
-            base64,
-            sourceMainImageId: selectedMainImageId,
-            debugPromptZh,
-            keyPrefix: `users/${authz.user.id}/step3/rear`,
-          });
-          return makeGalleryImage({
-            id: persisted.id,
-            type: "rear",
-            url: persisted.url,
-            sourceMainImageId: selectedMainImageId,
-            debugPromptZh,
-          });
-        })
-      );
+        });
+        const persisted = await persistGeneratedImage({
+          userId: authz.user.id,
+          taskId: taskIdForPersist,
+          kind: "rear",
+          base64,
+          sourceMainImageId: selectedMainImageId,
+          debugPromptZh,
+          keyPrefix: `users/${authz.user.id}/step3/rear`,
+        });
+        return makeGalleryImage({
+          id: persisted.id,
+          type: "rear",
+          url: persisted.url,
+          sourceMainImageId: selectedMainImageId,
+          debugPromptZh,
+        });
+      });
     }
 
     if (front) {
       const editPrompt = withEnhanceSoftLimits(
         prompt,
         [
+          `[SHOT_KIND: PRODUCT_FRONT_RELIGHT — request ${runNonce}_F] True frontal relight / minor camera correction only; **NOT** a duplicate casual copy of the init if the init is already frontal.`,
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           pendantBailLock,
@@ -555,35 +566,29 @@ export async function POST(req: Request) {
 
       const debugPromptZh = `正视图 / Front view\n用户 prompt：${prompt}\n\n${editPrompt}`;
 
-      jobs.push(
-        laoZhangImageToImage({
+      await runOneShot(async () => {
+        const base64 = await laoZhangImageToImage({
           initImageDataUrl: resolvedMainImageUrl,
           prompt: editPrompt,
           ...sharedImgArgs,
-        }).then(async (base64) => {
-          const persisted = await persistGeneratedImage({
-            userId: authz.user.id,
-            taskId: taskIdForPersist,
-            kind: "front",
-            base64,
-            sourceMainImageId: selectedMainImageId,
-            debugPromptZh,
-            keyPrefix: `users/${authz.user.id}/step3/front`,
-          });
-          return makeGalleryImage({
-            id: persisted.id,
-            type: "front",
-            url: persisted.url,
-            sourceMainImageId: selectedMainImageId,
-            debugPromptZh,
-          });
-        })
-      );
-    }
-
-    if (jobs.length) {
-      const generated = await Promise.all(jobs);
-      images.push(...generated);
+        });
+        const persisted = await persistGeneratedImage({
+          userId: authz.user.id,
+          taskId: taskIdForPersist,
+          kind: "front",
+          base64,
+          sourceMainImageId: selectedMainImageId,
+          debugPromptZh,
+          keyPrefix: `users/${authz.user.id}/step3/front`,
+        });
+        return makeGalleryImage({
+          id: persisted.id,
+          type: "front",
+          url: persisted.url,
+          sourceMainImageId: selectedMainImageId,
+          debugPromptZh,
+        });
+      });
     }
 
     return NextResponse.json({ galleryImages: images });
