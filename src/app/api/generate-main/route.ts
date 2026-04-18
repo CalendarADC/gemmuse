@@ -55,7 +55,7 @@ type Body = {
   /** @deprecated ??? bananaImageModel */
   step1ImageModel?: "banana-pro" | "banana-2";
   /** 客户端已成功注入 Cappy Calm 官方参考图时附带，用于追加角色锁定文案 */
-  cappyCalmLockPreset?: "s925" | "brass";
+  cappyCalmLockPreset?: "s925" | "goldPlated" | "brass";
 };
 
 const MAX_REFERENCE_DATA_URL_CHARS = 14 * 1024 * 1024;
@@ -99,7 +99,11 @@ export async function POST(req: Request) {
 
   const lockPresetRaw = body.cappyCalmLockPreset;
   const cappyCalmLockPreset =
-    lockPresetRaw === "brass" || lockPresetRaw === "s925" ? lockPresetRaw : null;
+    lockPresetRaw === "goldPlated" || lockPresetRaw === "brass"
+      ? "goldPlated"
+      : lockPresetRaw === "s925"
+        ? "s925"
+        : null;
 
   const bananaRaw =
     typeof body.bananaImageModel === "string"

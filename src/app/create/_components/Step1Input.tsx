@@ -262,10 +262,10 @@ export default function Step1Input() {
     if (preset === "s925") {
       return "Cappy Calm：已识别 925 银版本，生成时将自动附加官方角色参考图（无需手动上传）。";
     }
-    if (preset === "brass") {
-      return "Cappy Calm：已识别黄铜版本，生成时将自动附加官方角色参考图（无需手动上传）。";
+    if (preset === "goldPlated") {
+      return "Cappy Calm：已识别镀金版本，生成时将自动附加官方角色参考图（无需手动上传）。";
     }
-    return "检测到 Cappy Calm：请在文案中写明「925银 / sterling / 纯银」或「黄铜 / brass」，即可自动附加对应官方参考图。";
+    return "检测到 Cappy Calm：请在文案中写明「925银 / sterling / 纯银」或「镀金 / gold plated」等，即可自动附加对应官方参考图。";
   }, [prompt]);
 
   useEffect(() => {
