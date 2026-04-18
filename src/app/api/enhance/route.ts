@@ -1,6 +1,4 @@
-﻿import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 
 import type { GalleryImage, GalleryImageType } from "@/store/jewelryGeneratorStore";
 
@@ -8,7 +6,6 @@ import {
   LAOZHANG_IMAGE_MODEL_FLASH,
   LAOZHANG_IMAGE_MODEL_PRO,
   laoZhangImageToImage,
-  laoZhangImagesToImage,
   type ImageSize,
   type LaoZhangImageModelId,
 } from "@/lib/ai/AIService";
@@ -26,35 +23,6 @@ import { persistGeneratedImage } from "@/lib/images/persistGeneratedImage";
 import { ensureOwnedTaskId } from "@/lib/tasks/resolveTask";
 
 export const runtime = "nodejs";
-
-/** GemMuse 戒指正视/左/右/后官方机位样板（兔子戒指实拍），用于 img2img 第二参考图锁定镜头关系 */
-type RingHeroCanonAngle = "front" | "left" | "right" | "rear";
-
-async function loadRingCanonAngleRefDataUrl(which: RingHeroCanonAngle): Promise<string | null> {
-  try {
-    const filePath = path.join(
-      process.cwd(),
-      "public",
-      "references",
-      "ring-rabbit-hero-angles",
-      `${which}.png`
-    );
-    const buf = await readFile(filePath);
-    return `data:image/png;base64,${buf.toString("base64")}`;
-  } catch {
-    return null;
-  }
-}
-
-const RING_DUAL_REF_PREAMBLE = [
-  "MULTI-IMAGE INPUT ORDER (strict):",
-  "**First** inline image = the user-selected SKU ring (exact motif, stones, metal, engraving lock).",
-  "**Second** inline image = GemMuse **canonical camera-angle plate** for this output type (studio rabbit-ring reference pack).",
-  "Copy from plate 2 **only** lens grammar: azimuth, elevation (about 30-45 degrees above horizontal, slight high-angle product style), crop tightness, and how much band vs top motif appears in frame.",
-  "Do **not** transplant the plate's exact sculpt if it conflicts with image 1; all jewelry identity and topology stay locked to image 1.",
-  "FORBID: reproducing image 2's **species / face / stone layout / band engraving / SKU** as the output — image 2 is **not** a design target, only a **camera recipe**.",
-  "The output must depict **only** the ring from image 1 at the requested angle; never swap in the rabbit reference as the product.",
-].join("\n");
 
 function withEnhanceSoftLimits(
   prompt: string,
@@ -244,7 +212,7 @@ export async function POST(req: Request) {
       kind === "ring"
         ? [
             "RING FRONT VIEW ? FIGURE ORIENTATION (strict, standard ???):",
-            "Treat this like a classic e-commerce frontal hero: camera at eye level faces the ring's **primary display face** (animal head, relief, or main stone plane). The sculpted figure must face **toward the camera** ? eyes/muzzle toward the viewer in a **vertical** posture (good reference: frontal rabbit head ring).",
+            "Treat this like a classic e-commerce frontal hero: camera at eye level faces the ring's **primary display face** (animal head, relief, or main stone plane). The sculpted figure must face **toward the camera** ? eyes/muzzle toward the viewer in a **vertical** posture (standard catalog animal-head ring hero).",
             "The shank reads as a **horizontal oval / ellipse** (band roughly edge-on from this angle). This is NOT a plan / overhead shot from above the finger.",
             "FORBID: figure head tipped so the face aims **upward** toward sky/knuckle (zenith-facing) while the camera stays level ? that wrong orientation is NOT acceptable for this frontal view. FORBID mixing this up with top-down.",
           ].join("\n")
@@ -339,19 +307,6 @@ export async function POST(req: Request) {
 
     const jobs: Array<Promise<GalleryImage>> = [];
 
-    let ringCanonFront: string | null = null;
-    let ringCanonLeft: string | null = null;
-    let ringCanonRight: string | null = null;
-    let ringCanonRear: string | null = null;
-    if (kind === "ring" && (left || right || front || rear)) {
-      [ringCanonFront, ringCanonLeft, ringCanonRight, ringCanonRear] = await Promise.all([
-        loadRingCanonAngleRefDataUrl("front"),
-        loadRingCanonAngleRefDataUrl("left"),
-        loadRingCanonAngleRefDataUrl("right"),
-        loadRingCanonAngleRefDataUrl("rear"),
-      ]);
-    }
-
     if (onModel) {
       const onModelLines =
         kind === "ring"
@@ -415,14 +370,9 @@ export async function POST(req: Request) {
     }
 
     if (left) {
-      const ringChart = kind === "ring" ? ringCanonLeft : null;
-      const chartNote = ringChart
-        ? `${RING_DUAL_REF_PREAMBLE}\n\nCHART NOTE: image 2 = GemMuse canonical **LEFT** ring product angle (reference pack); replicate its **camera azimuth, elevation (~30-45deg high-angle), crop, and band-vs-motif balance** relative to the subject, applied to the SKU in image 1.`
-        : "";
       const editPrompt = withEnhanceSoftLimits(
         prompt,
         [
-          ...(chartNote ? [chartNote] : []),
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           step3LeftRightGemstoneColorLockBlock(),
@@ -445,20 +395,12 @@ export async function POST(req: Request) {
 
       const debugPromptZh = `左侧视图 / Left view\n用户 prompt：${prompt}\n\n${editPrompt}`;
 
-      const imgPromise = ringChart
-        ? laoZhangImagesToImage({
-            initImageDataUrls: [resolvedMainImageUrl, ringChart],
-            prompt: editPrompt,
-            ...sharedImgArgsLeftRight,
-          })
-        : laoZhangImageToImage({
-            initImageDataUrl: resolvedMainImageUrl,
-            prompt: editPrompt,
-            ...sharedImgArgsLeftRight,
-          });
-
       jobs.push(
-        imgPromise.then(async (base64) => {
+        laoZhangImageToImage({
+          initImageDataUrl: resolvedMainImageUrl,
+          prompt: editPrompt,
+          ...sharedImgArgsLeftRight,
+        }).then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
             taskId: taskIdForPersist,
@@ -480,14 +422,9 @@ export async function POST(req: Request) {
     }
 
     if (right) {
-      const ringChart = kind === "ring" ? ringCanonRight : null;
-      const chartNote = ringChart
-        ? `${RING_DUAL_REF_PREAMBLE}\n\nCHART NOTE: image 2 = GemMuse canonical **RIGHT** ring product angle (reference pack); replicate its **camera azimuth, elevation (~30-45deg high-angle), crop, and band-vs-motif balance** relative to the subject, applied to the SKU in image 1.`
-        : "";
       const editPrompt = withEnhanceSoftLimits(
         prompt,
         [
-          ...(chartNote ? [chartNote] : []),
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           step3LeftRightGemstoneColorLockBlock(),
@@ -510,20 +447,12 @@ export async function POST(req: Request) {
 
       const debugPromptZh = `右侧视图 / Right view\n用户 prompt：${prompt}\n\n${editPrompt}`;
 
-      const imgPromise = ringChart
-        ? laoZhangImagesToImage({
-            initImageDataUrls: [resolvedMainImageUrl, ringChart],
-            prompt: editPrompt,
-            ...sharedImgArgsLeftRight,
-          })
-        : laoZhangImageToImage({
-            initImageDataUrl: resolvedMainImageUrl,
-            prompt: editPrompt,
-            ...sharedImgArgsLeftRight,
-          });
-
       jobs.push(
-        imgPromise.then(async (base64) => {
+        laoZhangImageToImage({
+          initImageDataUrl: resolvedMainImageUrl,
+          prompt: editPrompt,
+          ...sharedImgArgsLeftRight,
+        }).then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
             taskId: taskIdForPersist,
@@ -550,14 +479,9 @@ export async function POST(req: Request) {
         : "";
 
     if (rear) {
-      const ringChart = kind === "ring" ? ringCanonRear : null;
-      const chartNote = ringChart
-        ? `${RING_DUAL_REF_PREAMBLE}\n\nCHART NOTE: image 2 = GemMuse canonical **REAR / back** ring shot (reference pack); replicate **camera behind the piece, slight high-angle (~40-50deg) toward the back of the motif and shank**, framing and crop relative to the subject in image 1.`
-        : "";
       const editPrompt = withEnhanceSoftLimits(
         prompt,
         [
-          ...(chartNote ? [chartNote] : []),
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           pendantBailLock,
@@ -580,20 +504,12 @@ export async function POST(req: Request) {
 
       const debugPromptZh = `后视图 / Rear view\n用户 prompt：${prompt}\n\n${editPrompt}`;
 
-      const imgPromise = ringChart
-        ? laoZhangImagesToImage({
-            initImageDataUrls: [resolvedMainImageUrl, ringChart],
-            prompt: editPrompt,
-            ...sharedImgArgs,
-          })
-        : laoZhangImageToImage({
-            initImageDataUrl: resolvedMainImageUrl,
-            prompt: editPrompt,
-            ...sharedImgArgs,
-          });
-
       jobs.push(
-        imgPromise.then(async (base64) => {
+        laoZhangImageToImage({
+          initImageDataUrl: resolvedMainImageUrl,
+          prompt: editPrompt,
+          ...sharedImgArgs,
+        }).then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
             taskId: taskIdForPersist,
@@ -615,14 +531,9 @@ export async function POST(req: Request) {
     }
 
     if (front) {
-      const ringChart = kind === "ring" ? ringCanonFront : null;
-      const chartNote = ringChart
-        ? `${RING_DUAL_REF_PREAMBLE}\n\nCHART NOTE: image 2 = GemMuse canonical **FRONT / near-front** ring hero (slight high-angle 3/4 product style); replicate its **camera-to-subject relationship, elevation, and framing** for the SKU in image 1.`
-        : "";
       const editPrompt = withEnhanceSoftLimits(
         prompt,
         [
-          ...(chartNote ? [chartNote] : []),
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           pendantBailLock,
@@ -644,20 +555,12 @@ export async function POST(req: Request) {
 
       const debugPromptZh = `正视图 / Front view\n用户 prompt：${prompt}\n\n${editPrompt}`;
 
-      const imgPromise = ringChart
-        ? laoZhangImagesToImage({
-            initImageDataUrls: [resolvedMainImageUrl, ringChart],
-            prompt: editPrompt,
-            ...sharedImgArgs,
-          })
-        : laoZhangImageToImage({
-            initImageDataUrl: resolvedMainImageUrl,
-            prompt: editPrompt,
-            ...sharedImgArgs,
-          });
-
       jobs.push(
-        imgPromise.then(async (base64) => {
+        laoZhangImageToImage({
+          initImageDataUrl: resolvedMainImageUrl,
+          prompt: editPrompt,
+          ...sharedImgArgs,
+        }).then(async (base64) => {
           const persisted = await persistGeneratedImage({
             userId: authz.user.id,
             taskId: taskIdForPersist,
