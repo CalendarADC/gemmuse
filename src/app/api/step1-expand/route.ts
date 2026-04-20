@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { expandStep1PromptWithAi } from "@/lib/ai/step1PromptAiExpander";
 import { inferJewelryProductKind } from "@/lib/ai/jewelrySoftLimits";
+import { requireApiActiveUser } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
 
@@ -10,6 +11,9 @@ type Body = {
 };
 
 export async function POST(req: Request) {
+  const authz = await requireApiActiveUser();
+  if (!authz.ok) return authz.response;
+
   const body = (await req.json().catch(() => ({}))) as Partial<Body>;
   const prompt = typeof body.prompt === "string" ? body.prompt : "";
   if (!prompt.trim()) {

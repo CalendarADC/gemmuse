@@ -1,4 +1,5 @@
-import type { Copywriting, GalleryImage, GalleryImageType, MainImage } from "@/store/jewelryGeneratorStore";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import type { Copywriting, GalleryImage, GalleryImageType, MainImage } from "@/store/jewelryGeneratorTypes";
 
 import type { TaskIdbPayload, TaskWorkspaceMeta } from "@/lib/tasks/taskPersistence";
 
@@ -289,17 +290,15 @@ export function mergeTaskWorkspaceWithServer(
 }
 
 export async function fetchTaskWorkspaceFromServer(taskId: string): Promise<ServerWorkspaceJson | null> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
-    const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/workspace`, {
-      signal: controller.signal,
-    });
+    const res = await fetchWithRetry(
+      `/api/tasks/${encodeURIComponent(taskId)}/workspace`,
+      { method: "GET" },
+      { retries: 2, baseDelayMs: 400, timeoutMs: 12_000 }
+    );
     if (!res.ok) return null;
     return (await res.json()) as ServerWorkspaceJson;
   } catch {
     return null;
-  } finally {
-    clearTimeout(timeoutId);
   }
 }

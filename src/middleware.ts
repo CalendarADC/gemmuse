@@ -1,26 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
+import { isProtectedPath, isPublicPath } from "@/lib/auth/middlewarePaths";
 import { getAuthSecret } from "@/lib/authSecret";
-
-const PUBLIC_PATHS = new Set(["/", "/login", "/register", "/pending"]);
-
-function isPublicPath(pathname: string): boolean {
-  if (PUBLIC_PATHS.has(pathname)) return true;
-  if (pathname.startsWith("/api/auth")) return true;
-  if (pathname.startsWith("/api/register")) return true;
-  return false;
-}
-
-function isProtectedPath(pathname: string): boolean {
-  if (pathname.startsWith("/create")) return true;
-  if (pathname.startsWith("/admin")) return true;
-  if (pathname.startsWith("/api/generate-main")) return true;
-  if (pathname.startsWith("/api/enhance")) return true;
-  if (pathname.startsWith("/api/generate-copy")) return true;
-  if (pathname.startsWith("/api/tasks")) return true;
-  return false;
-}
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

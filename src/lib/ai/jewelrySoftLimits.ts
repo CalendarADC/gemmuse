@@ -451,13 +451,10 @@ export function buildPendantNecklaceHeroPresentationEnBlock(): string {
 export function buildChinesePendantNecklacePresentationBlock(): string {
   return [
     "【吊坠/项链 — 三维结构与陈列方式（系统软限制，必须执行）】",
-    "所有吊坠/项链主体必须为完整三维立体结构（可铸造/雕刻的实体厚度与体积），后视图须呈现完整三维形态与可信厚度，禁止整体退化成平面光滑「铁片章」式无体积感造型（用户 prompt 明确要透底/镂空背等时除外）。",
-    "生成前须优先判断：该造型在常见展示台面上，若无手扶、能否在重力下自然直立而不倒（重心是否落在可支撑底面/足底/平底等）。",
-    "可直立场景：采用「图3」式陈列——主体置于画面中心区域，底部与台面稳定接触；顶部 bail/活动环呈**竖直提拉态**（仿佛上方有链向上拉直、便于建模对接链路与穿孔），**画面中仍不渲染链条**；挂环与主体连接处须有可信金属连续结构。禁止 bail 软塌塌平趴在头顶/造型上像「死重垂落」。禁止 bail 与主体无结构连接的悬浮环。",
-    "不可直立场景：采用「图1」式陈列——主体须依靠首饰盒立面、绒布垫/展示块侧壁等**明确可见的支撑物**承托完成平衡；bail 仍须遵守**竖直提拉、不画链**的同一规则（凡可见处）。",
-    "错误示例「图2」（严禁）：在无法自然直立的前提下，用尖角/窄边/单点支撑「立」在台面上且无任何背景依靠；**主体**呈明显不稳、现实中会倾倒的摆法；或封死/省略 bail、看不到可穿链的开孔。",
-    "凡无链入镜的吊坠/项链主图与多视角：bail/活动环以**竖立、可穿链**为默认读法，便于工业建模；仍禁止画出链条本体；禁止无开孔的死封装饰替代真实挂环。",
-    "【绝对禁止画链】参考图若带项链：必须忽略链条，不得复刻；画面顶部不得出现任何链节、绳段从画幅外穿入 bail。",
+    "所有吊坠/项链主体必须为完整三维实体（可铸造/雕刻的厚度与体积）；后视仍需有可信厚度与结构，禁止退化为平面「铁片章」（用户明确透底/镂空背除外）。",
+    "无佩戴指令时按产品/CAD 主图语义执行：只出 pendant body + bail，不画链条；bail 保持可穿链开孔与竖直提拉读法，禁止软塌、封死或悬浮断连。",
+    "陈列必须符合物理：可直立则稳定直立；不可直立则明确依靠支撑物；严禁不可能平衡的尖角/单点硬立姿态。",
+    "默认后视执行工业几何补全（与正面体量匹配），禁止空白平背；参考图若带链，仅取主体造型，不得照搬链条入镜。",
   ].join("\n");
 }
 
@@ -473,9 +470,6 @@ export function buildPendantPhysicalBlock(onModel: boolean): string {
     );
   } else {
     lines.push(buildPendantNecklaceHeroPresentationEnBlock());
-    lines.push(
-      "- BAIL — CAD UPRIGHT, NO CHAIN IN FRAME (strict): hero shows pendant body + bail only (render **zero** necklace chain / zero chain links). The bail / teardrop loop / jump ring must read **upright and vertically tensioned** along the stringing axis **as if an overhead chain pulls it straight** — chain is **implied only**, never drawn. **REQUIRE** a clearly **pass-through** opening for stringing and solid junction metal. **FORBID** a **slack / draped** bail lying flat on the motif like gravity-loose dead weight. **FORBID** a bail **floating** with broken or ambiguous attachment to the topper."
-    );
   }
   return lines.join("\n");
 }
@@ -509,9 +503,6 @@ export function buildMaterialLightingBlock(
   ];
   if (forEnhanceFromInit) {
     lines.push(
-      "IMG2IMG FINISH LOCK: **Do not re-master** metal or gems vs the init. Preserve micro-contrast in recesses and highlight sparkle intensity. FORBID global lift/gamma that washes shadows into gray fog or desaturates colored stones/pearls."
-    );
-    lines.push(
       "Corrosion / dirt negatives apply only to **new artifacts** — do NOT remove intentional dark oxidation in grooves or patina that already reads in the init."
     );
   } else {
@@ -524,15 +515,11 @@ export function buildMaterialLightingBlock(
   const silverish =
     isSterling925 || /silver|sterling|银/.test(promptLower);
   if (silverish) {
-    if (forEnhanceFromInit) {
-      lines.push(
-        "Silver / white-metal (init-locked): keep the **same** polished vs antiqued cavity contrast, specular width, and tonal warmth as the init — NOT a forced upgrade to mirror-bright catalog silver unless the init already reads that way."
-      );
-    } else if (wantsVintageOxidized) {
+    if (!forEnhanceFromInit && wantsVintageOxidized) {
       lines.push(
         "Silver: believable oxidized / antiqued recesses with controlled bright highlights on raised metal (where style fits)."
       );
-    } else {
+    } else if (!forEnhanceFromInit) {
       lines.push(
         "Silver: high-polish sterling with clean specular ribbons and realistic micro-reflections."
       );
@@ -620,11 +607,8 @@ export function buildMainImageCompositionBlock(
   } else {
     lines.push(
       customEnv
-        ? "Pendant framing (Step1 only): show the pendant body + bail only; NO necklace chain / NO chain segment. Rest the piece on the user-described surface/environment from the prompt (do not ignore wood/stone/fabric)."
-        : "Pendant framing (Step1 only): show the pendant body + bail only; NO necklace chain / NO chain segment. OR pristine flat lay on #F5F5F5/white studio."
-    );
-    lines.push(
-      "PENDANT BAIL — CAD UPRIGHT (Step1, no chain): render **no necklace chain**. The bail / jump ring must look **pulled vertically upward** (axis roughly plumb) as if a chain above the frame holds it straight for **stringing / CAD clarity** — **still do not draw the chain**. **FORBID** a fully slack bail **draped** sideways or collapsed resting on the motif."
+        ? "Pendant framing (Step1 only): show pendant body + bail on the user-described surface/environment (do not ignore wood/stone/fabric)."
+        : "Pendant framing (Step1 only): show pendant body + bail in a clean flat-lay / studio hero setup."
     );
     lines.push(
       "STEP1 PENDANT DISPLAY ANGLE (strict): front-facing or slight 3/4 toward camera so motif and stones read clearly; FORBID thin edge-only profile, side-only silhouette, or low grazing angles that hide the main face (same intent as upright ring hero — readable front, not side-only)."
@@ -710,9 +694,7 @@ export function buildNanoBananaProStep1SystemPrompt(prompt: string): string {
     "你是一位拥有 20 年经验的资深珠宝设计总监，精通全球艺术史与珠宝工艺。",
     "",
     "你是一位专业珠宝设计师兼 3D 渲染师。在生成珠宝图像时，必须确保所有戒指（ring）和吊坠（pendant）均为完整的三维实体，具备真实物理结构。",
-    "正面设计需精美复杂；背面须为可信金属封底与结构补全——可为对称深浮雕、分区肌理、品牌铭牌区或几何背纹，与正面体块重量感一致，避免无信息的大块镜面空背。",
-    "吊坠背面应包含挂环与链条连接结构（仅体现连接位置/孔位，不在画面中展示链条本体），并体现焊接或铸造的工艺痕迹。",
-    "主图无项链链条时：顶置 bail/挂环默认呈**竖直提拉态**（仿佛上方有链向上拉直、便于建模与穿链开孔识别），**不渲染链条**；须有可信金属连接与通透穿链孔。禁止软塌塌平趴在造型上的挂环；禁止与主体无结构连接的悬浮环。",
+    "正面需精美复杂，背面需与正面体量匹配并可制造；挂环/连接件必须真实可穿链且结构连续（具体吊坠陈列与禁链细则见下方系统块）。",
     ...(kind === "pendant"
       ? [
           "【主图铁律 — 吊坠/项链】除非用户明确要写「佩戴图/上身/模特颈间」等，否则**绝对禁止**在画面内画出项链链条、链节、绳段从画幅上方穿入 bail；参考图含链也**不得照搬**，只取造型本体与 bail。",
@@ -724,8 +706,7 @@ export function buildNanoBananaProStep1SystemPrompt(prompt: string): string {
     ...(kind === "pendant" ? [buildChinesePendantNecklacePresentationBlock(), ""] : []),
     "【3D结构与工艺硬性约束】",
     "珠宝必须为完整3D实体：严禁空心、凹陷、未完成半成品感；需体现真实厚度、重量感与可佩戴的人体工学。",
-    "吊坠后视图（无用户单独描述背面时）默认：按工业珠宝建模做几何补全——想象整块金属经雕刻去料而成；正面凸起在背面须有对应厚度、支撑与对称肌理，深浮雕与细节铺满，禁止退化成无信息的大光滑「铁片背」；实体可手持把玩、360° 不穿帮；不得从背面透视看穿正面图案，不得开放笼状未封闭结构。若用户 prompt 明确透底/镂空背等则服从。",
-    "连接处（Bail & Loop）必须牢固且可制造，体现焊接/铸造工艺痕迹；默认竖立提拉、便于对接链路与穿孔；仅体现链条连接孔位，不在主图中展示链条本体。",
+    "吊坠后视图（无用户单独描述背面时）默认执行工业几何补全；若用户明确透底/镂空背等则按用户意图执行。",
     "",
     "无论用户输入何种风格（如新艺术风格、神秘主义艺术风格、赛博朋克、极简主义、工业运动美术风格等多重风格），你必须严格遵循以下“三步设计法”进行创作：",
     "",

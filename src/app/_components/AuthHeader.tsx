@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { signOut } from "next-auth/react";
+import { useJewelryGeneratorStore } from "@/store/jewelryGeneratorStore";
 
 export default function AuthHeader({
   email,
@@ -10,6 +11,13 @@ export default function AuthHeader({
   email: string;
   role: "ADMIN" | "USER";
 }) {
+  const prepareForSignOut = useJewelryGeneratorStore((s) => s.prepareForSignOut);
+
+  const handleSignOut = async () => {
+    prepareForSignOut();
+    await signOut({ callbackUrl: "/login" });
+  };
+
   return (
     <header className="w-full border-b border-zinc-200 bg-white/90 px-4 py-2 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between">
@@ -23,7 +31,9 @@ export default function AuthHeader({
             </Link>
           ) : null}
           <button
-            onClick={() => signOut({ callbackUrl: "/login" })}
+            onClick={() => {
+              void handleSignOut();
+            }}
             className="rounded bg-zinc-900 px-3 py-1 text-white"
           >
             退出登录

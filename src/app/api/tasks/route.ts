@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { requireApiActiveUser } from "@/lib/apiAuth";
 import { prisma } from "@/lib/db";
 
+const privateCacheHeaders = {
+  "Cache-Control": "private, no-store, must-revalidate",
+};
+
 type TaskStepWire = "STEP1" | "STEP2" | "STEP3" | "STEP4";
 
 function toStep(v: unknown): TaskStepWire | null {
@@ -46,7 +50,7 @@ export async function GET() {
       },
     });
   }
-  return NextResponse.json({ tasks });
+  return NextResponse.json({ tasks }, { headers: privateCacheHeaders });
 }
 
 export async function POST(req: Request) {

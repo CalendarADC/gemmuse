@@ -7,6 +7,7 @@ import ImagePreviewModal from "./ImagePreviewModal";
 import BrandButton from "./BrandButton";
 import CircularSparkleGenerateButton from "./CircularSparkleGenerateButton";
 import Step1FlipClock from "./Step1FlipClock";
+import WindowedMount from "./WindowedMount";
 import { emitToast } from "@/lib/ui/toast";
 import { downloadImage } from "@/lib/ui/downloadImage";
 import { CREATE_STEP_INSET, CREATE_STEP_PAPER } from "./createStepShell";
@@ -270,22 +271,16 @@ export default function Step2Gallery() {
             const canFavorite = mainHistoryImages.some((x) => x.id === img.id) || !isInCurrent;
 
             return (
-              <div
-                data-main-card="1"
+              <WindowedMount
                 key={img.id}
-                role="button"
-                tabIndex={0}
-                onClick={() => {
-                  const items = displayedImages.map((x) => ({
-                    url: x.url,
-                    alt: "主视图",
-                  }));
-                  const idx = displayedImages.findIndex((x) => x.id === img.id);
-                  setPreviewItems(items);
-                  setPreviewIndex(idx >= 0 ? idx : 0);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
+                estimatedHeight={285}
+                enabled={viewMode !== "current"}
+              >
+                <div
+                  data-main-card="1"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
                     const items = displayedImages.map((x) => ({
                       url: x.url,
                       alt: "主视图",
@@ -293,24 +288,34 @@ export default function Step2Gallery() {
                     const idx = displayedImages.findIndex((x) => x.id === img.id);
                     setPreviewItems(items);
                     setPreviewIndex(idx >= 0 ? idx : 0);
-                  }
-                }}
-                className={[
-                  "relative overflow-hidden rounded-2xl border bg-[var(--create-surface-paper)] text-left shadow-[0_1px_8px_rgba(45,55,72,0.06)]",
-                  selected
-                    ? "border-[#C5A059]"
-                    : "border-[rgba(94,111,130,0.18)] hover:border-[rgba(199,178,153,0.55)]",
-                ].join(" ")}
-              >
-                <div className="aspect-square bg-[color-mix(in_srgb,var(--create-surface-tray)_42%,var(--create-surface-paper))]">
-                  <img
-                    src={img.url}
-                    alt="主视图"
-                    draggable={false}
-                    className="h-full w-full object-cover"
-                    loading="lazy"
-                  />
-                </div>
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      const items = displayedImages.map((x) => ({
+                        url: x.url,
+                        alt: "主视图",
+                      }));
+                      const idx = displayedImages.findIndex((x) => x.id === img.id);
+                      setPreviewItems(items);
+                      setPreviewIndex(idx >= 0 ? idx : 0);
+                    }
+                  }}
+                  className={[
+                    "relative overflow-hidden rounded-2xl border bg-[var(--create-surface-paper)] text-left shadow-[0_1px_8px_rgba(45,55,72,0.06)]",
+                    selected
+                      ? "border-[#C5A059]"
+                      : "border-[rgba(94,111,130,0.18)] hover:border-[rgba(199,178,153,0.55)]",
+                  ].join(" ")}
+                >
+                  <div className="aspect-square bg-[color-mix(in_srgb,var(--create-surface-tray)_42%,var(--create-surface-paper))]">
+                    <img
+                      src={img.url}
+                      alt="主视图"
+                      draggable={false}
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                    />
+                  </div>
 
                 {/* 左上角：选中指示圆圈（只点击圆圈才表示选中） */}
                 <button
@@ -439,7 +444,7 @@ export default function Step2Gallery() {
                   )}
                 </button>
 
-                {/* 右下角：历史/最爱模式下显示收藏星标；当前模式显示刷新 */}
+                {/* 右下角：历史/最爱模式下显示收藏星标；当前模式显示重试 */}
                 {viewMode !== "current" && canFavorite ? (
                   <button
                     type="button"
@@ -462,7 +467,7 @@ export default function Step2Gallery() {
                 {viewMode === "current" && isInCurrent ? (
                   <button
                     type="button"
-                    aria-label="刷新这张主图"
+                    aria-label="重试这张主图"
                     disabled={status.step1Generating || refreshingId === img.id}
                     onClick={async (e) => {
                       e.stopPropagation();
@@ -486,7 +491,8 @@ export default function Step2Gallery() {
                     </span>
                   </button>
                 ) : null}
-              </div>
+                </div>
+              </WindowedMount>
             );
           })}
         </div>
@@ -497,7 +503,6 @@ export default function Step2Gallery() {
             : "还没有生成主视图。请先完成 Step 1。"}
         </div>
       )}
-
       {status.step1Generating ? (
         <div className="text-xs text-gray-500">正在生成中...</div>
       ) : null}
@@ -761,7 +766,7 @@ export default function Step2Gallery() {
                     }
                   })();
                 }}
-                className="h-[34px] px-4 text-sm"
+                className="h-[34px] px-4 text-sm transition-all hover:brightness-110 hover:shadow-[0_6px_16px_rgba(220,38,38,0.25)] focus-visible:ring-2 focus-visible:ring-red-300"
               >
                 确认删除
               </BrandButton>

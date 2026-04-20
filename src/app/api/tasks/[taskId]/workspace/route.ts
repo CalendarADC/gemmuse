@@ -5,6 +5,10 @@ import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs";
 
+const privateCacheHeaders = {
+  "Cache-Control": "private, no-store, must-revalidate",
+};
+
 export async function GET(_req: Request, ctx: { params: Promise<{ taskId: string }> }) {
   const authz = await requireApiActiveUser();
   if (!authz.ok) return authz.response;
@@ -22,32 +26,30 @@ export async function GET(_req: Request, ctx: { params: Promise<{ taskId: string
   if (!task) {
     return NextResponse.json({ message: "任务不存在" }, { status: 404 });
   }
-
-  const [images, latestCopy] = await Promise.all([
-    prisma.generatedImage.findMany({
-      where: { userId: authz.user.id, taskId: id },
-      orderBy: { createdAt: "asc" },
-      select: {
-        id: true,
-        kind: true,
-        url: true,
-        sourceMainImageId: true,
-        debugPromptZh: true,
-        createdAt: true,
-      },
-    }),
-    prisma.generatedCopywriting.findFirst({
-      where: { userId: authz.user.id, taskId: id },
-      orderBy: { createdAt: "desc" },
-      select: {
-        title: true,
-        tags: true,
-        description: true,
-        debugUsedModel: true,
-        debugImageCount: true,
-      },
-    }),
-  ]);
+  // 连接池紧张时避免交互式事务超时：改为普通查询，减少事务占用窗口。
+  const images = await prisma.generatedImage.findMany({
+    where: { userId: authz.user.id, taskId: id },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      kind: true,
+      url: true,
+      sourceMainImageId: true,
+      debugPromptZh: true,
+      createdAt: true,
+    },
+  });
+  const latestCopy = await prisma.generatedCopywriting.findFirst({
+    where: { userId: authz.user.id, taskId: id },
+    orderBy: { createdAt: "desc" },
+    select: {
+      title: true,
+      tags: true,
+      description: true,
+      debugUsedModel: true,
+      debugImageCount: true,
+    },
+  });
 
   const copywriting = latestCopy
     ? {
@@ -62,15 +64,18 @@ export async function GET(_req: Request, ctx: { params: Promise<{ taskId: string
       }
     : null;
 
-  return NextResponse.json({
-    images: images.map((r: (typeof images)[number]) => ({
-      id: r.id,
-      kind: r.kind,
-      url: r.url,
-      sourceMainImageId: r.sourceMainImageId,
-      debugPromptZh: r.debugPromptZh,
-      createdAt: r.createdAt.toISOString(),
-    })),
-    copywriting,
-  });
+  return NextResponse.json(
+    {
+      images: images.map((r) => ({
+        id: r.id,
+        kind: r.kind,
+        url: r.url,
+        sourceMainImageId: r.sourceMainImageId,
+        debugPromptZh: r.debugPromptZh,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      copywriting,
+    },
+    { headers: privateCacheHeaders }
+  );
 }

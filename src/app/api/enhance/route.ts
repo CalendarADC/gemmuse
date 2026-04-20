@@ -10,6 +10,11 @@ import {
   type LaoZhangImageModelId,
 } from "@/lib/ai/AIService";
 import {
+  getInitToneLockInstruction,
+  getStep3LeftRightGemstoneColorLockBlock,
+  getStep3LeftRightPromptVariant,
+} from "@/lib/ai/enhancePromptBlocks";
+import {
   buildEnhanceSoftLimitSuffix,
   buildPendantRearViewDefaultSolidBackBlock,
   buildRingWomensOnModelLuxuryPresentationBlock,
@@ -89,16 +94,6 @@ function step3UserTextSecondaryBlock(prompt: string): string {
   ].join("\n");
 }
 
-/** ?/?????????????? ?????? */
-function step3LeftRightGemstoneColorLockBlock(): string {
-  return [
-    "GEMSTONE COLOR / HUE LOCK (strict ? left/right only):",
-    "Every visible gem (center stone, eyes, accents) must keep the **same base hue and body color** as the init ? e.g. **blue stays blue**, **green stays green**.",
-    "**FORBID** recoloring stones to simulate variety when the camera did not actually move. Gem hue shifts = **incorrect** output for this brief.",
-    "Specular highlights may relocate with light; **do not** change underlying stone color, saturation, or apparent species/count.",
-  ].join("\n");
-}
-
 type Body = {
   taskId?: string;
   provider: string;
@@ -167,9 +162,10 @@ export async function POST(req: Request) {
     bananaRaw === "banana-2" ? LAOZHANG_IMAGE_MODEL_FLASH : LAOZHANG_IMAGE_MODEL_PRO;
 
   // Step3 ?????????????? img2img ???????????????
-  const sampling = provider === "nano-banana-pro" ? { temperature: 0.52, topP: 0.8 } : undefined;
+  // Step3 以「保持 SKU 与主图影调」为第一目标：降低随机度，减少发灰重打光与左右串位。
+  const sampling = provider === "nano-banana-pro" ? { temperature: 0.32, topP: 0.68 } : undefined;
   const samplingLeftRight =
-    provider === "nano-banana-pro" ? { temperature: 0.4, topP: 0.72 } : undefined;
+    provider === "nano-banana-pro" ? { temperature: 0.26, topP: 0.62 } : undefined;
 
   if (!selectedMainImageId || !selectedMainImageUrl) {
     return NextResponse.json({ message: "?? selectedMainImage ???" }, { status: 400 });
@@ -214,6 +210,9 @@ export async function POST(req: Request) {
     };
 
     const kind = inferJewelryProductKind(prompt);
+    const lrAbVariant = getStep3LeftRightPromptVariant();
+    const lrGemToneBlock = getStep3LeftRightGemstoneColorLockBlock(lrAbVariant);
+    const initToneLockInstruction = getInitToneLockInstruction(lrAbVariant);
 
     const baseKeepInstruction =
       "IMAGE EDIT ONLY: Preserve the init image design bit-for-bit intent ? zero redesign. Same silhouette, same motif, same stones, same metal finish **and the same overall exposure / white balance / saturation / shadow depth as the init**; only apply the requested camera orbit. **FORBID** a global gray haze, flat low-contrast relight, or desaturated \"catalog re-grade\" vs the reference.";
@@ -292,6 +291,9 @@ export async function POST(req: Request) {
       const antiMirror = isLeft
         ? "**ANTI-DUPLICATE (vs RIGHT orbit)**: **FORBID** an output that could pass as a **horizontal mirror** of a correct RIGHT shot for this SKU (same muzzle screen bearing, same cushion crop, only specular shift). CCW orbit must change **which** cheek, ear, and bail opening leg are dominant."
         : "**ANTI-DUPLICATE (vs LEFT orbit)**: **FORBID** an output that could pass as a **horizontal mirror** of a correct LEFT shot for this SKU (same muzzle screen bearing, same cushion crop, only specular shift). CW orbit must change **which** cheek, ear, and bail opening leg are dominant.";
+      const motifFacingAnchor = isLeft
+        ? "MOTIF SCREEN-BEARING ANCHOR (strict): in this LEFT orbit, the rabbit muzzle/nose axis should read toward **screen-left** (not screen-right). If it points to screen-right, you produced the opposite side."
+        : "MOTIF SCREEN-BEARING ANCHOR (strict): in this RIGHT orbit, the rabbit muzzle/nose axis should read toward **screen-right** (not screen-left). If it points to screen-left, you produced the opposite side.";
       return [
         `PENDANT ? **${isLeft ? "LEFT" : "RIGHT"} ORBIT ONLY** (this request is NOT the opposite side; do not split the difference):`,
         pendantSideVsRearDisambiguation,
@@ -299,11 +301,12 @@ export async function POST(req: Request) {
         `TOP-DOWN TABLE PLAN (mandatory): Top-down on the jewelry on the velvet: hero camera was at **12 o'clock** facing the primary design front. Move the camera to **${clockPos}** around the piece (${orbitLabel}, ~70°–110° arc) so ${flank} is materially closer to the lens and dominates new silhouette cues.`,
         foreshortenHint,
         antiMirror,
+        motifFacingAnchor,
         "The init image is usually a near-frontal hero. This output must **NOT** be a second straight-on / orthographic front duplicate: the motif plane must **NOT** stay parallel to the camera like the main shot.",
         "Rotate the viewpoint strongly into a **three-quarter oblique side shot** (good reference: leopard/lion head pendant on velvet ? seen from above-side so you read snout/jaw **profile**, cheek plane, **metal thickness**, filigree depth, and the **bail loop from an angle** with its opening visible).",
         "REQUIRE obvious **lateral information**: at least two of ? side profile of head/muzzle, flank relief, asymmetric ear/mane read, bail seen from the side, visible back vs front plane separation.",
         "BAIL NON-NEGOTIABLE (side view): the **bail must remain a separate metal loop/volume** attached at the top (or same azimuth as the source), readable in side or 3/4 ? **never cropped off, never merged into the scalloped border, never deleted for a cleaner profile**.",
-        "BAIL ORIENTATION (no chain in frame): bail / jump ring reads **upright / vertically tensioned** (implied overhead chain pull) for CAD stringing clarity ? **still render zero chain**.",
+        "BAIL ORIENTATION (no chain in frame): bail / jump ring reads **upright / vertically tensioned** (implied overhead chain pull) for CAD stringing clarity ? **still render zero chain**. **FORBID** gravity-slack / naturally drooped loop.",
         "REST ON SURFACE (strict): same display fabric/tray as main image; **pendant body** **lies** on it with weight ? contact shadows, slight cloth compression. **Top bail** keeps the **upright chain-pull** read (no chain drawn). FORBID the **whole jewel** levitating with zero surface contact; FORBID a bolt-upright **statue** pose of the entire body if the main was a lying tabletop hero.",
         "LYING POSE + CAMERA (strict): velvet/table pose is allowed, but the **camera must still sight the same outer convex hero relief** as the init, from a **left/right azimuth** ? **FORBID** arranging the piece so the **hollow molded reverse / concave back impression** faces the lens (that reads as wrong rear, not side).",
         "FORBID: repeating the same frontal framing as the input; symmetric front mascot pose when the brief is left/right view.",
@@ -338,16 +341,6 @@ export async function POST(req: Request) {
           ].join("\n")
         : "";
 
-    const ringInnerSurfaceLock =
-      kind === "ring"
-        ? [
-            "RING INNER SURFACE LOCK (strict, all Step3 views):",
-            "The finger-contact inner loop must remain a smooth, continuous, mirror-polished 360-degree finished band (finished jewelry quality).",
-            "No true dents and no fake dents from lighting/shadow illusion: avoid shading/specular patterns that make the inner loop look concave, sunken, grooved, ridged, or seamed.",
-            "FORBID: inner dent, inner pit/dimple, groove inside shank, concave trench, raised inner ridge, seam-like line, casting seam, inner engraving/text/filigree. Decorations stay on outer/top surfaces only.",
-          ].join("\n")
-        : "";
-
     /** 同一张 init 并发多路 img2img 时，部分上游易出现近似重复输出；顺序执行 + 明确 SHOT_KIND 降低串视角风险。 */
     const runOneShot = async (shot: () => Promise<GalleryImage>) => {
       images.push(await shot());
@@ -369,7 +362,6 @@ export async function POST(req: Request) {
               "Composition preference: 3/4 hand view or palm-down full-hand showcase with the ring clearly readable; keep natural anatomy and believable perspective.",
               "Use a clean, Etsy-friendly background. Natural lighting, sharp focus, realistic reflections.",
               "FINGER PLACEMENT (strict): wear the ring on **index**, **middle**, or **ring finger** only ? strongly prefer **index or middle** (?? / ??); rotate between index vs middle across generations. **FORBID pinky finger (??)** ? never place the ring on the little finger. Natural knuckle spacing and anatomy.",
-              ringInnerSurfaceLock,
               "Avoid adding extra rings, avoid changing the gemstone, keep the ring centered and clearly visible.",
               step3UserTextSecondaryBlock(prompt),
             ]
@@ -423,9 +415,10 @@ export async function POST(req: Request) {
         prompt,
         [
           `[SHOT_KIND: PRODUCT_LEFT_ORBIT — request ${runNonce}_L] Camera is on the jewelry's **physical LEFT** (counterclockwise from top). This is **NOT** a RIGHT-side shot; do **NOT** mirror a right-orbit composition.`,
+          initToneLockInstruction,
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
-          step3LeftRightGemstoneColorLockBlock(),
+          lrGemToneBlock,
           pendantBailLock,
           pendantLateralViewForSide("left"),
           ringLeftRightViewFullBlock,
@@ -433,7 +426,6 @@ export async function POST(req: Request) {
           "LEFT JOB ? ASYMMETRY (strict): vs. the init hero, the frame must favor **more visible metal/shank and setting on the camera-left** and **clearer foreshortening toward camera-right** (counterclockwise orbit read ? not a symmetric frontal).",
           "Generate a LEFT-side product view: camera moved to the **LEFT** of the set (around ~60?110?from the old front axis), macro studio shot ? NOT the same straight-on front as the input.",
           "Keep the jewelry design exactly identical to the input; only change camera position and resulting perspective.",
-          ringInnerSurfaceLock,
           keepMainBackgroundInstruction,
           "Realistic reflections, no extra jewelry, no model unless it is a ring on a display stand.",
           step3UserTextSecondaryBlock(prompt),
@@ -475,9 +467,10 @@ export async function POST(req: Request) {
         prompt,
         [
           `[SHOT_KIND: PRODUCT_RIGHT_ORBIT — request ${runNonce}_R] Camera is on the jewelry's **physical RIGHT** (clockwise from top). This is **NOT** a LEFT-side shot; do **NOT** reuse a left-orbit composition.`,
+          initToneLockInstruction,
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
-          step3LeftRightGemstoneColorLockBlock(),
+          lrGemToneBlock,
           pendantBailLock,
           pendantLateralViewForSide("right"),
           ringLeftRightViewFullBlock,
@@ -485,7 +478,6 @@ export async function POST(req: Request) {
           "RIGHT JOB ? ASYMMETRY (strict): vs. the init hero, the frame must favor **more visible metal/shank and setting on the camera-right** and **clearer foreshortening toward camera-left** (clockwise orbit read ? not a symmetric frontal).",
           "Generate a RIGHT-side product view: camera moved to the **RIGHT** of the set (around ~60?110?from the old front axis), macro studio shot ? NOT the same straight-on front as the input.",
           "Keep the jewelry design exactly identical to the input; only change camera position and resulting perspective.",
-          ringInnerSurfaceLock,
           keepMainBackgroundInstruction,
           "Realistic reflections, no extra jewelry, no model unless it is a ring on a display stand.",
           step3UserTextSecondaryBlock(prompt),
@@ -532,6 +524,7 @@ export async function POST(req: Request) {
         prompt,
         [
           `[SHOT_KIND: PRODUCT_REAR — request ${runNonce}_B]`,
+          initToneLockInstruction,
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           pendantBailLock,
@@ -542,7 +535,6 @@ export async function POST(req: Request) {
             : "",
           "Keep the jewelry exactly identical to the input image in design; only change the camera angle.",
           pendantRearIndustrialGeometryBlock,
-          ringInnerSurfaceLock,
           keepMainBackgroundInstruction,
           "Realistic reflections, no extra jewelry, no hands.",
           step3UserTextSecondaryBlock(prompt),
@@ -584,6 +576,7 @@ export async function POST(req: Request) {
         prompt,
         [
           `[SHOT_KIND: PRODUCT_FRONT_RELIGHT — request ${runNonce}_F] True frontal relight / minor camera correction only; **NOT** a duplicate casual copy of the init if the init is already frontal.`,
+          initToneLockInstruction,
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           pendantBailLock,
@@ -593,7 +586,6 @@ export async function POST(req: Request) {
           strictFrontViewInstruction,
           ringFrontFiguralFacingLens,
           pendantFrontMotifFacingLens,
-          ringInnerSurfaceLock,
           keepMainBackgroundInstruction,
           "Realistic reflections, no extra jewelry, no hands unless on-model was requested separately.",
           step3UserTextSecondaryBlock(prompt),

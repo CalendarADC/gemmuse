@@ -11,6 +11,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "seed:admin": "tsx scripts/seed-admin.ts",
@@ -46,7 +47,8 @@
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.4"
   },
   "build": {
     "appId": "com.gemmuse.desktop",

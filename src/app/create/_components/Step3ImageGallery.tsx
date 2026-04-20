@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import { useJewelryGeneratorStore, type GalleryImage } from "@/store/jewelryGeneratorStore";
 import ImagePreviewModal from "./ImagePreviewModal";
 import BrandButton from "./BrandButton";
+import WindowedMount from "./WindowedMount";
 import { emitToast } from "@/lib/ui/toast";
 import { downloadImage } from "@/lib/ui/downloadImage";
 import { applyStep1ReferenceFromGalleryUrl } from "@/lib/ui/applyStep1ReferenceFromGalleryUrl";
@@ -14,7 +15,13 @@ import { IconStep2Favorites, IconStep2History } from "./step2ToolbarIcons";
 
 const STEP3_LAYOUT_STORAGE_KEY = "jewelry-step3-layout-v1";
 const STEP3_LAYOUT_DEBUG_KEY = "STEP3_LAYOUT_DEBUG";
+const THUMB_PREVIEW_BATCH_SIZE = 8;
+const THUMB_MAX_WIDTH = 220;
+const THUMB_WEBP_QUALITY = 0.72;
+const STEP3_WINDOWED_GROUP_ESTIMATED_HEIGHT = 360;
 type DetachedInsertMeta = { anchorGroupKey: string; position: "before" | "after" };
+type ThumbWorkerReq = { id: number; src: string; maxW: number; quality: number };
+type ThumbWorkerRes = { id: number; url: string; error?: string };
 
 function getDataUrlExt(url: string): string {
   // url: data:image/png;base64,....
@@ -190,7 +197,11 @@ function step3DisplayGroupKey(
   );
 }
 
-async function buildThumbDataUrl(src: string, maxW = 220, quality = 0.72): Promise<string> {
+async function buildThumbDataUrlOnMainThread(
+  src: string,
+  maxW = THUMB_MAX_WIDTH,
+  quality = THUMB_WEBP_QUALITY
+): Promise<string> {
   if (typeof window === "undefined") return src;
   if (!src.startsWith("data:image/")) return src;
   const img = new Image();
@@ -262,6 +273,12 @@ export default function Step3ImageGallery() {
   const [extractedStackCardKey, setExtractedStackCardKey] = useState<string | null>(null);
   const extractTimerRef = useRef<number | null>(null);
   const [thumbUrlByKey, setThumbUrlByKey] = useState<Record<string, string>>({});
+  const thumbUrlByKeyRef = useRef<Record<string, string>>({});
+  const thumbWorkerRef = useRef<Worker | null>(null);
+  const thumbWorkerSeqRef = useRef(1);
+  const thumbWorkerPendingRef = useRef<
+    Map<number, { resolve: (url: string) => void; reject: (e: unknown) => void }>
+  >(new Map());
   const armedImageKeyRef = useRef<string | null>(null);
   const step3PointerSessionRef = useRef<{
     key: string;
@@ -281,6 +298,70 @@ export default function Step3ImageGallery() {
   useEffect(() => {
     armedImageKeyRef.current = armedImageKey;
   }, [armedImageKey]);
+
+  useEffect(() => {
+    thumbUrlByKeyRef.current = thumbUrlByKey;
+  }, [thumbUrlByKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof Worker === "undefined") return;
+    try {
+      const worker = new Worker(
+        new URL("../../workers/thumbDataUrl.worker.ts", import.meta.url),
+        { type: "module" }
+      );
+      thumbWorkerRef.current = worker;
+      worker.onmessage = (ev: MessageEvent<ThumbWorkerRes>) => {
+        const { id, url } = ev.data;
+        const pending = thumbWorkerPendingRef.current.get(id);
+        if (!pending) return;
+        thumbWorkerPendingRef.current.delete(id);
+        pending.resolve(url);
+      };
+      worker.onerror = (e) => {
+        const err = e instanceof ErrorEvent ? e.error ?? e.message : e;
+        for (const [, pending] of thumbWorkerPendingRef.current.entries()) {
+          pending.reject(err);
+        }
+        thumbWorkerPendingRef.current.clear();
+      };
+    } catch {
+      thumbWorkerRef.current = null;
+    }
+
+    return () => {
+      const worker = thumbWorkerRef.current;
+      thumbWorkerRef.current = null;
+      if (worker) worker.terminate();
+      for (const [, pending] of thumbWorkerPendingRef.current.entries()) {
+        pending.reject(new Error("thumb worker disposed"));
+      }
+      thumbWorkerPendingRef.current.clear();
+    };
+  }, []);
+
+  const buildThumbDataUrl = useCallback(async (src: string): Promise<string> => {
+    const worker = thumbWorkerRef.current;
+    if (!worker) {
+      return buildThumbDataUrlOnMainThread(src, THUMB_MAX_WIDTH, THUMB_WEBP_QUALITY);
+    }
+    return new Promise<string>((resolve, reject) => {
+      const id = thumbWorkerSeqRef.current++;
+      thumbWorkerPendingRef.current.set(id, { resolve, reject });
+      try {
+        const payload: ThumbWorkerReq = {
+          id,
+          src,
+          maxW: THUMB_MAX_WIDTH,
+          quality: THUMB_WEBP_QUALITY,
+        };
+        worker.postMessage(payload);
+      } catch (err) {
+        thumbWorkerPendingRef.current.delete(id);
+        reject(err);
+      }
+    });
+  }, []);
 
   const displayImages = useMemo(() => {
     if (viewMode === "history") {
@@ -329,27 +410,43 @@ export default function Step3ImageGallery() {
     let cancelled = false;
     const queue = displayImages.filter((img) => {
       const key = getImageInstanceKey(img);
-      return !thumbUrlByKey[key];
+      return !thumbUrlByKeyRef.current[key];
     });
     if (!queue.length) return;
     (async () => {
+      let pending: Record<string, string> = {};
+      const flushPending = () => {
+        const next = pending;
+        pending = {};
+        if (!Object.keys(next).length) return;
+        setThumbUrlByKey((prev) => ({ ...prev, ...next }));
+        thumbUrlByKeyRef.current = { ...thumbUrlByKeyRef.current, ...next };
+      };
       for (const img of queue) {
         if (cancelled) return;
         const key = getImageInstanceKey(img);
         try {
           const thumb = await buildThumbDataUrl(img.url);
           if (cancelled) return;
-          setThumbUrlByKey((prev) => (prev[key] ? prev : { ...prev, [key]: thumb }));
+          if (!thumbUrlByKeyRef.current[key] && !pending[key]) {
+            pending[key] = thumb;
+          }
         } catch {
           if (cancelled) return;
-          setThumbUrlByKey((prev) => (prev[key] ? prev : { ...prev, [key]: img.url }));
+          if (!thumbUrlByKeyRef.current[key] && !pending[key]) {
+            pending[key] = img.url;
+          }
+        }
+        if (Object.keys(pending).length >= THUMB_PREVIEW_BATCH_SIZE) {
+          flushPending();
         }
       }
+      flushPending();
     })();
     return () => {
       cancelled = true;
     };
-  }, [displayImages, thumbUrlByKey]);
+  }, [buildThumbDataUrl, displayImages]);
 
   useEffect(() => {
     return () => {
@@ -1288,7 +1385,7 @@ export default function Step3ImageGallery() {
                     ) : null}
                     <button
                       type="button"
-                      aria-label="刷新这张展示图"
+                      aria-label="重试这张展示图"
                       disabled={status.step3Generating || refreshingId === img.id}
                       onClick={async (e) => {
                         e.stopPropagation();
@@ -1311,7 +1408,12 @@ export default function Step3ImageGallery() {
               };
 
               return (
-                <div key={g.key} data-step3-group-card="1" className="rounded-2xl border border-[rgba(94,111,130,0.12)] bg-white/60 p-2 shadow-sm">
+                <WindowedMount
+                  key={g.key}
+                  estimatedHeight={STEP3_WINDOWED_GROUP_ESTIMATED_HEIGHT}
+                  enabled={viewMode !== "current"}
+                >
+                <div data-step3-group-card="1" className="rounded-2xl border border-[rgba(94,111,130,0.12)] bg-white/60 p-2 shadow-sm">
                   <div className="grid grid-cols-[1fr_110px] gap-2">
                     <div
                       data-step3-hero-drop={g.key}
@@ -1491,6 +1593,7 @@ export default function Step3ImageGallery() {
                     </div>
                   ) : null}
                 </div>
+                </WindowedMount>
               );
             })}
           </div>
@@ -1646,7 +1749,7 @@ export default function Step3ImageGallery() {
                   }}
                   className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-semibold disabled:opacity-50"
                 >
-                  刷新
+                  重试
                 </button>
                 {viewMode !== "current" ? (
                   <button
@@ -1730,7 +1833,7 @@ export default function Step3ImageGallery() {
                   }
                   setConfirmDelete(null);
                 }}
-                className="h-[34px] px-4 text-sm"
+                className="h-[34px] px-4 text-sm transition-all hover:brightness-110 hover:shadow-[0_6px_16px_rgba(220,38,38,0.25)] focus-visible:ring-2 focus-visible:ring-red-300"
               >
                 确认删除
               </BrandButton>

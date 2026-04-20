@@ -19,309 +19,65 @@ import {
   type TaskIdbPayload,
   type TaskWorkspaceMeta,
 } from "@/lib/tasks/taskPersistence";
+import { fetchServerTasks } from "@/lib/tasks/fetchServerTasks";
 import { resolveCappyCalmStep1ReferenceDataUrls } from "@/lib/ip/resolveCappyCalmStep1References";
 import {
   fetchTaskWorkspaceFromServer,
   mergeTaskWorkspaceWithServer,
   pickLatestMainTimeCluster,
 } from "@/lib/tasks/mergeServerWorkspace";
+import { emitToast } from "@/lib/ui/toast";
+
+import type {
+  AIProvider,
+  Copywriting,
+  GalleryImage,
+  GalleryImageSelector,
+  GalleryImageType,
+  GeneratorTask,
+  JewelryGeneratorStore,
+  MainImage,
+  Step1ExpansionStrength,
+  StepBananaImageModel,
+} from "./jewelryGeneratorTypes";
+import {
+  clampCount,
+  emptyCopywriting,
+  friendlyFetchErrorMessage,
+  galleryImageSelectorKey,
+  idleGeneratorStatus,
+  initialSidebarTask,
+  newTaskId,
+  withStep1Generating,
+  withStep3Generating,
+  withStep4Generating,
+} from "./jewelryGeneratorStoreHelpers";
+
+export type {
+  AIProvider,
+  Copywriting,
+  GalleryImage,
+  GalleryImageSelector,
+  GalleryImageType,
+  GeneratorTask,
+  JewelryGeneratorStore,
+  MainImage,
+  Step1ExpansionStrength,
+  Step1ImageModel,
+  StepBananaImageModel,
+} from "./jewelryGeneratorTypes";
 
 /** Step1 点击生成瞬间已有的主图 id；用于在请求挂起/刷新后从 workspace 识别「本轮」新图。 */
 let step1RecoverPreMainIdSet: ReadonlySet<string> | null = null;
-
-/** 将浏览器/Node 的 fetch 连接失败转为可读中文提示 */
-function friendlyFetchErrorMessage(e: unknown): string | undefined {
-  if (!(e instanceof Error)) return undefined;
-  const msg = e.message;
-  if (
-    msg === "fetch failed" ||
-    /failed to fetch|networkerror|load failed|network request failed/i.test(msg)
-  ) {
-    if (typeof window !== "undefined") {
-      const h = window.location.hostname;
-      if (h === "localhost" || h === "127.0.0.1") {
-        return "无法连接服务器：请确认已在项目目录运行 npm run dev，并在浏览器打开与终端一致的本地地址（常见为 http://localhost:3000）后再试。";
-      }
-    }
-    return "无法连接服务器：请检查本机网络、VPN/代理或广告拦截插件；若使用线上站点，请稍后重试或确认 Vercel 部署与域名可访问。（请求发往当前页面域名，不会使用你电脑上的 localhost。）";
-  }
-  return msg;
-}
-
-export type AIProvider = "nano-banana-pro" | "chatgpt-1.5";
-export type Step1ExpansionStrength = "standard" | "strong";
-/** Step1/2：老张 Banana pro（Pro）与 Banana 2（Flash） */
-export type StepBananaImageModel = "banana-pro" | "banana-2";
-/** @deprecated 仅旧 IDB meta 迁移 */
-export type Step1ImageModel = "banana-pro" | "banana-2";
-
-export type MainImage = {
-  id: string;
-  url: string;
-  createdAt?: string;
-  /** 是否收藏（用于历史记录防误删） */
-  isFavorite?: boolean;
-  /** 该图像对应的（中文呈现的）最终提示词调试信息 */
-  debugPromptZh?: string;
-};
-
-export type GalleryImageType =
-  | "main"
-  | "on_model"
-  | "left"
-  | "right"
-  | "rear"
-  | "front"
-  /** 旧版俯视图，仅兼容历史记录；新生成不再产生 */
-  | "top"
-  /** 旧版「侧视图」，仅兼容历史记录；新生成不再产生 */
-  | "side";
-
-export type GalleryImage = {
-  id: string;
-  type: GalleryImageType;
-  url: string;
-  sourceMainImageId: string;
-  /** 是否收藏（用于历史记录防误删） */
-  isFavorite?: boolean;
-  /** 该展示图对应的（中文呈现的）最终提示词调试信息 */
-  debugPromptZh?: string;
-  /**
-   * 同一次 Step3 生成（点击“生成展示图组合”）的多张图会共享该 setId，用于历史记录分组。
-   */
-  setId?: string;
-  setCreatedAt?: string;
-  createdAt?: string;
-};
-
-export type GalleryImageSelector = {
-  id: string;
-  setId?: string;
-  sourceMainImageId: string;
-  type: GalleryImageType;
-  createdAt?: string;
-};
-
-function galleryImageSelectorKey(s: GalleryImageSelector): string {
-  return [s.id, s.setId ?? "", s.sourceMainImageId, s.type, s.createdAt ?? ""].join("::");
-}
-
-export type Copywriting = {
-  title: string;
-  tags: string[]; // Etsy: 13 高流量标签（这里不强制长度，后续可补齐/校验）
-  description: string;
-};
-
-/** 左侧任务分组：每个任务有独立工作区（IndexedDB 按 taskId 分库存） */
-export type GeneratorTask = {
-  id: string;
-  name: string;
-  sortOrder?: number;
-  currentStep?: "STEP1" | "STEP2" | "STEP3" | "STEP4";
-  createdAt: string;
-  updatedAt: string;
-  /** 用于搜索与侧栏摘要，仅保留约 160 字 */
-  searchLine: string;
-  /**
-   * 最近一次 Step1 生图**成功**时使用的完整提示词（不截断），随 tasks 写入 localStorage，
-   * 用于刷新后恢复输入框全文；与 searchLine 并存。
-   */
-  lastSuccessPrompt?: string;
-  /** 为 true 时不可删除（随 tasks 持久化到 localStorage） */
-  isProtected?: boolean;
-};
-
-type GeneratorStatus = {
-  step1Generating: boolean;
-  step3Generating: boolean;
-  step4Generating: boolean;
-  /** 各步生成开始时间（ms），用于跨页面卸载后仍能连续计时 */
-  step1GenerationStartedAt: number | null;
-  step3GenerationStartedAt: number | null;
-  step4GenerationStartedAt: number | null;
-};
-
-function idleGeneratorStatus(): GeneratorStatus {
-  return {
-    step1Generating: false,
-    step3Generating: false,
-    step4Generating: false,
-    step1GenerationStartedAt: null,
-    step3GenerationStartedAt: null,
-    step4GenerationStartedAt: null,
-  };
-}
-
-function withStep1Generating(s: GeneratorStatus, on: boolean): GeneratorStatus {
-  return { ...s, step1Generating: on, step1GenerationStartedAt: on ? Date.now() : null };
-}
-
-function withStep3Generating(s: GeneratorStatus, on: boolean): GeneratorStatus {
-  return { ...s, step3Generating: on, step3GenerationStartedAt: on ? Date.now() : null };
-}
-
-function withStep4Generating(s: GeneratorStatus, on: boolean): GeneratorStatus {
-  return { ...s, step4Generating: on, step4GenerationStartedAt: on ? Date.now() : null };
+const USER_SCOPE_LS_KEY = "jewelry-generator-user-scope-v1";
+let currentUserScopeId: string | null = null;
+if (typeof window !== "undefined") {
+  currentUserScopeId = localStorage.getItem(USER_SCOPE_LS_KEY)?.trim() || null;
 }
 
 type ApiError = {
   message?: string;
 };
-
-function clampCount(v: number) {
-  if (!Number.isFinite(v)) return 1;
-  return Math.min(5, Math.max(1, Math.floor(v)));
-}
-
-type JewelryGeneratorStore = {
-  // ========== 多任务 ==========
-  tasks: GeneratorTask[];
-  activeTaskId: string;
-
-  // ========== 全局配置 / 输入 ==========
-  provider: AIProvider;
-  prompt: string;
-  count: number;
-  step1BananaImageModel: StepBananaImageModel;
-  step2BananaImageModel: StepBananaImageModel;
-  step1ExpansionStrength: Step1ExpansionStrength;
-  step1FastMode: boolean;
-  step2FastMode: boolean;
-  /** Step1 可选参考图（data URL），最多 3 张；不写入 persist */
-  step1ReferenceImageDataUrls: string[];
-
-  // ========== Step 1 输出 ==========
-  mainImages: MainImage[];
-  // 历史主图：用于 Step 2 查看历史记录（隐藏当前集外的旧版本）
-  mainHistoryImages: MainImage[];
-  selectedMainImageId: string | null;
-  selectedMainImageUrl: string | null;
-  // Step2 支持多选：用于 Step3 批量生成其他角度
-  selectedMainImageIds: string[];
-
-  // ========== Step 3 输出 ==========
-  galleryImages: GalleryImage[];
-
-  // ========== Step 3 历史记录 ==========
-  // 用于查看历史生成的 Step3 结果；Step4 仍然只使用 galleryImages（当前集合）。
-  galleryHistoryImages: GalleryImage[];
-
-  // ========== Step 4 输出 ==========
-  copywriting: Copywriting;
-
-  // ========== UI 状态 ==========
-  status: GeneratorStatus;
-  error: string | null;
-  lastTextModelUsed: string | null;
-  lastImageCountPassed: number | null;
-
-  // ========== Actions ==========
-  setProvider: (provider: AIProvider) => void;
-  setPrompt: (prompt: string) => void;
-  setCount: (count: number) => void;
-  setStep1BananaImageModel: (v: StepBananaImageModel) => void;
-  setStep2BananaImageModel: (v: StepBananaImageModel) => void;
-  setStep1ExpansionStrength: (v: Step1ExpansionStrength) => void;
-  setStep1FastMode: (v: boolean) => void;
-  setStep2FastMode: (v: boolean) => void;
-  addStep1ReferenceImage: (dataUrl: string) => boolean;
-  removeStep1ReferenceImageAt: (index: number) => void;
-  clearStep1ReferenceImages: () => void;
-  resetAll: () => void;
-
-  createNewTask: (name?: string) => Promise<void>;
-  syncTasksFromServer: () => Promise<void>;
-  syncActiveTaskWorkspaceFromServer: () => Promise<void>;
-  switchTask: (taskId: string) => Promise<void>;
-  renameTask: (taskId: string, name: string) => void;
-  setTaskProtected: (taskId: string, isProtected: boolean) => void;
-  deleteTask: (taskId: string) => Promise<void>;
-  /** 将 draggedId 移到 targetId 之前（顺序仅由 tasks 数组决定，与 updatedAt 无关） */
-  reorderTasks: (draggedId: string, targetId: string) => void;
-
-  // Step 1: 生成主视图（成功且至少一张图时返回 true，供界面跳转 Step2）
-  generateMainImages: () => Promise<boolean>;
-  /** 生成中轮询：若服务端已有本轮新主图则合并状态并返回 true（供跳转 Step2）。 */
-  recoverStep1FromServerIfComplete: () => Promise<boolean>;
-  regenerateMainImage: (id: string) => Promise<void>;
-
-  // Step 2: 选择主视图
-  selectMainImage: (id: string) => void;
-  toggleMainImageSelection: (id: string) => void;
-  setMainImageSelection: (ids: string[]) => void;
-
-  // Step 3: 更新增强后的图片集合
-  replaceGalleryImages: (images: GalleryImage[]) => void;
-  addGalleryImages: (images: GalleryImage[]) => void;
-  clearGalleryImages: () => void;
-  enhanceGalleryImages: (args: {
-    onModel: boolean;
-    left: boolean;
-    right: boolean;
-    rear: boolean;
-    front?: boolean;
-  }) => Promise<boolean>;
-  // Step 3: 单张展示图刷新（只替换对应 type/sourceMainImageId 的版本）
-  regenerateGalleryImage: (imageId: string) => Promise<void>;
-
-  // Step2/Step3 历史记录删除
-  toggleMainHistoryFavorite: (id: string) => void;
-  toggleGalleryHistoryFavoriteBySelector: (selector: GalleryImageSelector) => void;
-  /** 成功更新本地（且云端删除成功或无需删云端）时返回 true */
-  deleteMainHistoryImagesByIds: (ids: string[]) => Promise<boolean>;
-  /** 先删云端 GeneratedImage，再更新本地；否则下次同步会把已删图并回（见 mergeGalleryDedupe） */
-  deleteGalleryHistoryImagesBySelectors: (selectors: GalleryImageSelector[]) => Promise<boolean>;
-
-  // 从历史集合中切换到指定 setId 对应的当前集合（用于 Step4）
-  setGallerySetAsCurrent: (setId: string) => void;
-
-  // Step 4: 设置/生成文案
-  setCopywriting: (next: Copywriting) => void;
-  generateCopywriting: () => Promise<void>;
-};
-
-const emptyCopywriting: Copywriting = { title: "", tags: [], description: "" };
-
-function newTaskId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function seedGeneratorTask(name: string): GeneratorTask {
-  const now = new Date().toISOString();
-  return {
-    id: newTaskId(),
-    name,
-    sortOrder: 0,
-    currentStep: "STEP1",
-    createdAt: now,
-    updatedAt: now,
-    searchLine: "",
-    isProtected: false,
-  };
-}
-
-type ServerTask = {
-  id: string;
-  name: string;
-  searchLine: string;
-  isProtected: boolean;
-  sortOrder: number;
-  currentStep: "STEP1" | "STEP2" | "STEP3" | "STEP4";
-  createdAt: string;
-  updatedAt: string;
-};
-
-async function fetchServerTasks(): Promise<ServerTask[]> {
-  const res = await fetch("/api/tasks", { method: "GET" });
-  if (!res.ok) throw new Error(`任务同步失败（HTTP ${res.status}）`);
-  const data = (await res.json().catch(() => ({}))) as { tasks?: ServerTask[] };
-  return Array.isArray(data.tasks) ? data.tasks : [];
-}
-
-const initialSidebarTask = seedGeneratorTask("任务 1");
 
 function pickTaskMeta(s: JewelryGeneratorStore): TaskWorkspaceMeta {
   return {
@@ -393,7 +149,8 @@ function mergeLoadedWorkspaceWithMemory(activeId: string, loaded: TaskIdbPayload
 }
 
 /** 按任务备份当前输入框全文（防抖）；另有 tasks.lastSuccessPrompt 记录上次生图成功时的完整 prompt */
-const LS_TASK_PROMPT_KEY = (id: string) => `jewelry-gem-task-prompt-v1-${id}`;
+const LS_TASK_PROMPT_KEY = (id: string) =>
+  `jewelry-gem-task-prompt-v1-${currentUserScopeId ?? "global"}-${id}`;
 let promptBackupTimer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleTaskPromptBackup(taskId: string, prompt: string) {
@@ -571,6 +328,7 @@ let tasksHydrated = false;
 export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
   persist(
     (set, get) => ({
+      authUserId: null,
       tasks: [initialSidebarTask],
       activeTaskId: initialSidebarTask.id,
 
@@ -598,6 +356,102 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
       error: null,
       lastTextModelUsed: null,
       lastImageCountPassed: null,
+
+      initializeUserScope: async (userId) => {
+        if (typeof window === "undefined") return;
+        const scoped = userId.trim();
+        if (!scoped) return;
+
+        const storedScope = localStorage.getItem(USER_SCOPE_LS_KEY)?.trim() ?? "";
+        const prevScope = (currentUserScopeId ?? storedScope) || null;
+        currentUserScopeId = scoped;
+        localStorage.setItem(USER_SCOPE_LS_KEY, scoped);
+        set({ authUserId: scoped });
+
+        // 首次加载或同账号刷新：保留现有本地缓存行为。
+        if (!prevScope || prevScope === scoped) return;
+
+        // 账号切换：清理当前内存态，避免把上个账号的任务/历史展示给当前账号。
+        const prev = get();
+        for (const t of prev.tasks) clearTaskPromptBackup(t.id);
+        flushDebouncedTaskMetaSave();
+        switchTaskHeadId = null;
+        step1RecoverPreMainIdSet = null;
+        tasksHydrated = false;
+
+        const now = new Date().toISOString();
+        const bootstrapId = newTaskId();
+        const bootstrapTask: GeneratorTask = {
+          id: bootstrapId,
+          name: "任务 1",
+          sortOrder: 0,
+          currentStep: "STEP1",
+          createdAt: now,
+          updatedAt: now,
+          searchLine: "",
+          isProtected: false,
+        };
+        set({
+          tasks: [bootstrapTask],
+          activeTaskId: bootstrapId,
+          provider: "nano-banana-pro",
+          prompt: "",
+          count: 1,
+          step1BananaImageModel: "banana-pro",
+          step2BananaImageModel: "banana-pro",
+          step1ExpansionStrength: "standard",
+          step1FastMode: false,
+          step2FastMode: false,
+          step1ReferenceImageDataUrls: [],
+          mainImages: [],
+          mainHistoryImages: [],
+          selectedMainImageId: null,
+          selectedMainImageUrl: null,
+          selectedMainImageIds: [],
+          galleryImages: [],
+          galleryHistoryImages: [],
+          copywriting: emptyCopywriting,
+          status: idleGeneratorStatus(),
+          error: null,
+          lastTextModelUsed: null,
+          lastImageCountPassed: null,
+        });
+
+        try {
+          const serverTasks = await fetchServerTasks();
+          if (!serverTasks.length) return;
+          const activeId = serverTasks[0]!.id;
+          let loaded = await loadTaskFromIdb(activeId);
+          const serverWorkspace = await fetchTaskWorkspaceFromServer(activeId);
+          loaded = mergeTaskWorkspaceWithServer(loaded, serverWorkspace);
+          commitSwitchedTaskWorkspace(set, activeId, loaded, serverTasks);
+        } catch {
+          // 网络失败时保留本地 bootstrap 任务，避免空白页。
+        } finally {
+          tasksHydrated = true;
+        }
+      },
+      prepareForSignOut: () => {
+        // 仅清理内存态 UI（不触碰任务清单与持久化 prompt），避免登出瞬间串屏。
+        flushDebouncedTaskMetaSave();
+        switchTaskHeadId = null;
+        step1RecoverPreMainIdSet = null;
+        set({
+          status: idleGeneratorStatus(),
+          error: null,
+          step1ReferenceImageDataUrls: [],
+          mainImages: [],
+          mainHistoryImages: [],
+          selectedMainImageId: null,
+          selectedMainImageUrl: null,
+          selectedMainImageIds: [],
+          galleryImages: [],
+          galleryHistoryImages: [],
+          copywriting: emptyCopywriting,
+          lastTextModelUsed: null,
+          lastImageCountPassed: null,
+        });
+      },
 
       setProvider: (provider) => {
         set({ provider });
@@ -711,14 +565,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           const s = get();
           const serverIds = new Set(tasks.map((t) => t.id));
           const serverTasks: GeneratorTask[] = tasks.map((t) => ({
-            id: t.id,
-            name: t.name,
-            searchLine: t.searchLine,
-            isProtected: t.isProtected,
-            sortOrder: t.sortOrder,
-            currentStep: t.currentStep,
-            createdAt: t.createdAt,
-            updatedAt: t.updatedAt,
+            ...t,
             lastSuccessPrompt: s.tasks.find((x) => x.id === t.id)?.lastSuccessPrompt,
           }));
           // 保留仅本地任务：数据库不可用期间生成的本地工作区不应被云端空列表覆盖。
@@ -741,8 +588,10 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             tasks: mergedTasks,
             activeTaskId,
           });
-        } catch {
-          /* keep local fallback */
+        } catch (e) {
+          const msg =
+            friendlyFetchErrorMessage(e) ?? "任务列表同步失败，将使用本地数据。可稍后重试。";
+          emitToast({ type: "error", message: msg, durationMs: 6500 });
         }
       },
 
@@ -1908,38 +1757,13 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
       deleteMainHistoryImagesByIds: async (ids) => {
         const idSet = new Set(ids);
         const snapshot = get();
+        const taskId = snapshot.activeTaskId?.trim() ?? "";
         const serverDeleteIds = ids.filter((id) => {
           const m =
             snapshot.mainHistoryImages.find((x) => x.id === id) ??
             snapshot.mainImages.find((x) => x.id === id);
           return !!m && !m.isFavorite;
         });
-
-        if (serverDeleteIds.length) {
-          try {
-            const res = await fetch(
-              `/api/tasks/${encodeURIComponent(snapshot.activeTaskId)}/workspace/images`,
-              {
-                method: "DELETE",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ids: serverDeleteIds }),
-              }
-            );
-            if (!res.ok) {
-              const data = (await res.json().catch(() => ({}))) as { message?: string };
-              set({
-                error:
-                  typeof data.message === "string"
-                    ? data.message
-                    : "云端删除主图失败，刷新后仍可能出现已删图片，请稍后再试。",
-              });
-              return false;
-            }
-          } catch {
-            set({ error: "云端删除主图失败，请检查网络后重试。" });
-            return false;
-          }
-        }
 
         set((state) => {
           const nextMainHistoryImages = state.mainHistoryImages.filter(
@@ -1976,10 +1800,40 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         });
         const s2 = get();
         if (tasksHydrated) scheduleDebouncedTaskMetaSave(s2.activeTaskId, pickTaskMeta(s2));
-        try {
-          await persistActiveWorkspace(s2);
-        } catch {
-          /* ignore */
+        void persistActiveWorkspace(s2).catch(() => undefined);
+
+        // 云端删除改为异步，保证确认删除后 UI 立即响应。
+        if (taskId && serverDeleteIds.length) {
+          const WORKSPACE_DELETE_CHUNK = 48;
+          void (async () => {
+            try {
+              for (let i = 0; i < serverDeleteIds.length; i += WORKSPACE_DELETE_CHUNK) {
+                const chunk = serverDeleteIds.slice(i, i + WORKSPACE_DELETE_CHUNK);
+                const res = await fetch(
+                  `/api/tasks/${encodeURIComponent(taskId)}/workspace/images`,
+                  {
+                    method: "DELETE",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ids: chunk }),
+                  }
+                );
+                if (!res.ok) {
+                  const data = (await res.json().catch(() => ({}))) as { message?: string };
+                  const message =
+                    typeof data.message === "string"
+                      ? data.message
+                      : "云端删除主图失败，刷新后仍可能出现已删图片，请稍后再试。";
+                  set({ error: message });
+                  emitToast({ type: "error", message, durationMs: 2200 });
+                  return;
+                }
+              }
+            } catch {
+              const message = "云端删除主图失败，请检查网络后重试。";
+              set({ error: message });
+              emitToast({ type: "error", message, durationMs: 2200 });
+            }
+          })();
         }
         return true;
       },
@@ -2005,35 +1859,6 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         const idsArr = [...serverIds].filter((id) => typeof id === "string" && id.length > 0);
         const WORKSPACE_DELETE_CHUNK = 48;
 
-        if (taskId && idsArr.length) {
-          try {
-            for (let i = 0; i < idsArr.length; i += WORKSPACE_DELETE_CHUNK) {
-              const chunk = idsArr.slice(i, i + WORKSPACE_DELETE_CHUNK);
-              const res = await fetch(
-                `/api/tasks/${encodeURIComponent(taskId)}/workspace/images`,
-                {
-                  method: "DELETE",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ ids: chunk }),
-                }
-              );
-              if (!res.ok) {
-                const data = (await res.json().catch(() => ({}))) as { message?: string };
-                set({
-                  error:
-                    typeof data.message === "string"
-                      ? data.message
-                      : "云端删除展示图失败，刷新后仍可能出现已删图片，请稍后再试。",
-                });
-                return false;
-              }
-            }
-          } catch {
-            set({ error: "云端删除展示图失败，请检查网络后重试。" });
-            return false;
-          }
-        }
-
         set((state) => {
           const nextGalleryHistoryImages = state.galleryHistoryImages.filter(
             (x) => x.isFavorite || !matchSelector(x)
@@ -2048,10 +1873,39 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         });
         const s2 = get();
         if (tasksHydrated) scheduleDebouncedTaskMetaSave(s2.activeTaskId, pickTaskMeta(s2));
-        try {
-          await persistActiveWorkspace(s2);
-        } catch {
-          /* ignore */
+        void persistActiveWorkspace(s2).catch(() => undefined);
+
+        // 云端删除改为异步，保证确认删除后 UI 立即响应。
+        if (taskId && idsArr.length) {
+          void (async () => {
+            try {
+              for (let i = 0; i < idsArr.length; i += WORKSPACE_DELETE_CHUNK) {
+                const chunk = idsArr.slice(i, i + WORKSPACE_DELETE_CHUNK);
+                const res = await fetch(
+                  `/api/tasks/${encodeURIComponent(taskId)}/workspace/images`,
+                  {
+                    method: "DELETE",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ids: chunk }),
+                  }
+                );
+                if (!res.ok) {
+                  const data = (await res.json().catch(() => ({}))) as { message?: string };
+                  const message =
+                    typeof data.message === "string"
+                      ? data.message
+                      : "云端删除展示图失败，刷新后仍可能出现已删图片，请稍后再试。";
+                  set({ error: message });
+                  emitToast({ type: "error", message, durationMs: 2200 });
+                  return;
+                }
+              }
+            } catch {
+              const message = "云端删除展示图失败，请检查网络后重试。";
+              set({ error: message });
+              emitToast({ type: "error", message, durationMs: 2200 });
+            }
+          })();
         }
         return true;
       },
@@ -2147,6 +2001,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
     {
       name: "jewelry-generator-v3",
       partialize: (state) => ({
+        authUserId: state.authUserId,
         tasks: state.tasks,
         activeTaskId: state.activeTaskId,
         /** 与 IDB 双轨：避免仅依赖 IndexedDB 时刷新后输入框被空 meta 覆盖 */
@@ -2162,6 +2017,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               : p.tasks[0].id;
           return {
             ...(current as JewelryGeneratorStore),
+            ...(typeof p.authUserId === "string" ? { authUserId: p.authUserId } : {}),
             tasks: p.tasks,
             activeTaskId: active,
             ...(typeof p.prompt === "string" ? { prompt: p.prompt } : {}),
@@ -2190,6 +2046,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
       },
       onRehydrateStorage: () => (_rehydrated, error) => {
         if (error || typeof window === "undefined") return;
+        currentUserScopeId = localStorage.getItem(USER_SCOPE_LS_KEY)?.trim() || null;
         // persist 在 localStorage 同步返回时会立刻跑完 then 链；此时 `export const useJewelryGeneratorStore = create(...)` 尚未赋值，会触发 TDZ。
         // 推迟到微任务之后，保证 store 已绑定到导出常量。
         queueMicrotask(() => {
@@ -2205,14 +2062,9 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             const historyTask = s0.tasks.find((t) => t.name === "历史工作区");
             const legacyTargetId = historyTask?.id ?? activeId;
             await migrateLegacyIdbToTask(legacyTargetId);
-            // 旧逻辑只迁到「历史工作区」任务时，当前选中的任务 IDB 仍为空；再迁一次到 active，避免主图只出现在别的任务里。
-            if (legacyTargetId !== activeId) {
-              await migrateLegacyIdbToTask(activeId);
-            }
             await mergeLegacyGalleryOnlyIfMissing(legacyTargetId);
-            if (legacyTargetId !== activeId) {
-              await mergeLegacyGalleryOnlyIfMissing(activeId);
-            }
+            // 注意：仅迁移到历史兜底任务，避免把旧全局工作区内容注入当前 activeTask，
+            // 导致“新任务看到旧任务历史”的跨任务串库问题。
             activeId = useJewelryGeneratorStore.getState().activeTaskId;
             let loaded = await loadTaskFromIdb(activeId);
             const snap = useJewelryGeneratorStore.getState();

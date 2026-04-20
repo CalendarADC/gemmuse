@@ -1,11 +1,25 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import DragScrollAssist from "./DragScrollAssist";
 import AppToastHost from "./AppToastHost";
 import TaskSidebar from "./TaskSidebar";
 import CreateStepNav from "./CreateStepNav";
-export default function CreateWorkspaceLayout({ children }: { children: ReactNode }) {
+import { useJewelryGeneratorStore } from "@/store/jewelryGeneratorStore";
+
+export default function CreateWorkspaceLayout({
+  userId,
+  children,
+}: {
+  userId: string;
+  children: ReactNode;
+}) {
+  const initializeUserScope = useJewelryGeneratorStore((s) => s.initializeUserScope);
+
+  useEffect(() => {
+    void initializeUserScope(userId);
+  }, [initializeUserScope, userId]);
+
   return (
     <main className="create-workspace-chrome flex min-h-screen flex-col lg:flex-row">
       <div className="order-2 flex min-h-0 w-full shrink-0 flex-col lg:order-1 lg:sticky lg:top-0 lg:h-screen lg:w-auto lg:min-w-0">
