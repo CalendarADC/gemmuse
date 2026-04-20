@@ -207,9 +207,6 @@ export default function TaskSidebar() {
   const status = useJewelryGeneratorStore((s) => s.status);
   const createNewTask = useJewelryGeneratorStore((s) => s.createNewTask);
   const syncTasksFromServer = useJewelryGeneratorStore((s) => s.syncTasksFromServer);
-  const syncActiveTaskWorkspaceFromServer = useJewelryGeneratorStore(
-    (s) => s.syncActiveTaskWorkspaceFromServer
-  );
   const switchTask = useJewelryGeneratorStore((s) => s.switchTask);
   const renameTask = useJewelryGeneratorStore((s) => s.renameTask);
   const setTaskProtected = useJewelryGeneratorStore((s) => s.setTaskProtected);
@@ -242,9 +239,9 @@ export default function TaskSidebar() {
   useEffect(() => {
     void (async () => {
       await syncTasksFromServer();
-      await syncActiveTaskWorkspaceFromServer();
+      // 首屏只同步任务列表；工作区同步由 hydration / 切任务触发，避免首屏叠加慢请求造成卡顿。
     })();
-  }, [syncTasksFromServer, syncActiveTaskWorkspaceFromServer]);
+  }, [syncTasksFromServer]);
 
   useEffect(() => {
     if (sidebarCollapsed) setTaskMenu(null);

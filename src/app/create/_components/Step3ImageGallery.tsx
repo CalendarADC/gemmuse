@@ -120,6 +120,19 @@ function getImageInstanceKey(img: {
   ].join("::");
 }
 
+/** 左侧主图 + 右侧全部副图 + 拖入本组的图，用于整组删除 */
+function collectStep3GroupInstanceKeys(g: {
+  displayHero: GalleryImage;
+  displayThumbs: GalleryImage[];
+  movedIn: GalleryImage[];
+}): string[] {
+  const keys = new Set<string>();
+  keys.add(getImageInstanceKey(g.displayHero));
+  for (const t of g.displayThumbs) keys.add(getImageInstanceKey(t));
+  for (const m of g.movedIn) keys.add(getImageInstanceKey(m));
+  return [...keys];
+}
+
 function parseGalleryTime(iso?: string): number {
   if (!iso) return 0;
   const t = Date.parse(iso);
@@ -225,7 +238,9 @@ export default function Step3ImageGallery() {
 
   const [showPromptModal, setShowPromptModal] = useState(false);
   const [promptModalText, setPromptModalText] = useState<string>("");
-  const [confirmDeleteKeys, setConfirmDeleteKeys] = useState<string[] | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<
+    null | { keys: string[]; scope: "selection" | "group" }
+  >(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [draggingImageKey, setDraggingImageKey] = useState<string | null>(null);
   const [dropTargetGroupKey, setDropTargetGroupKey] = useState<string | null>(null);
@@ -1052,7 +1067,7 @@ export default function Step3ImageGallery() {
               disabled={status.step3Generating || isZipping}
               onClick={() => {
                 if (!selectedImageKeys.length) return;
-                setConfirmDeleteKeys([...selectedImageKeys]);
+                setConfirmDelete({ keys: [...selectedImageKeys], scope: "selection" });
               }}
               className="h-[34px] px-4 text-xs"
             >
@@ -1097,8 +1112,17 @@ export default function Step3ImageGallery() {
                 setPreviewIndex(idx >= 0 ? idx : 0);
               };
 
-              const renderTile = (img: (typeof displayImages)[number], compact: boolean) => {
+              const renderTile = (
+                img: (typeof displayImages)[number],
+                compact: boolean,
+                groupBundle?: (typeof groupedSets)[number]
+              ) => {
                 const imageKey = getImageInstanceKey(img);
+                const showDeleteWholeGroup =
+                  !!groupBundle &&
+                  !compact &&
+                  viewMode !== "current" &&
+                  getImageInstanceKey(groupBundle.displayHero) === imageKey;
                 return (
                 <div
                   key={imageKey}
@@ -1128,6 +1152,31 @@ export default function Step3ImageGallery() {
                       onDragStart={(e) => e.preventDefault()}
                     />
                   </div>
+                  {showDeleteWholeGroup && groupBundle ? (
+                    <button
+                      type="button"
+                      aria-label="删除整组展示图"
+                      title="删除整组（主图与全部副图）"
+                      disabled={status.step3Generating}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmDelete({
+                          keys: collectStep3GroupInstanceKeys(groupBundle),
+                          scope: "group",
+                        });
+                      }}
+                      className="pointer-events-auto absolute right-2 top-2 z-20 inline-flex h-7 w-7 items-center justify-center rounded-full bg-red-600 text-white shadow-md ring-1 ring-red-700/30 transition hover:bg-red-700 disabled:opacity-50"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path
+                          d="M8 8l8 8M16 8l-8 8"
+                          stroke="currentColor"
+                          strokeWidth="2.2"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  ) : null}
                   {!compact ? (
                     <button
                       type="button"
@@ -1157,7 +1206,10 @@ export default function Step3ImageGallery() {
                         setPromptModalText(img.debugPromptZh ?? "");
                         setShowPromptModal(true);
                       }}
-                      className="absolute right-2 top-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/90 ring-1 ring-gray-200 hover:bg-white backdrop-blur text-[10px]"
+                      className={[
+                        "absolute right-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/90 ring-1 ring-gray-200 hover:bg-white backdrop-blur text-[10px]",
+                        showDeleteWholeGroup ? "top-12 z-10" : "top-2",
+                      ].join(" ")}
                     >
                       👁
                     </button>
@@ -1268,7 +1320,7 @@ export default function Step3ImageGallery() {
                         step3LayoutDragEnabled && heroDropTargetGroupKey === g.key ? "ring-2 ring-[#5E6F82]/35" : "",
                       ].join(" ")}
                     >
-                      {renderTile(g.displayHero, false)}
+                      {renderTile(g.displayHero, false, g)}
                     </div>
                     <div
                       data-step3-thumb-col-drop={g.key}
@@ -1608,7 +1660,7 @@ export default function Step3ImageGallery() {
                         });
                         return;
                       }
-                      setConfirmDeleteKeys([getImageInstanceKey(current)]);
+                      setConfirmDelete({ keys: [getImageInstanceKey(current)], scope: "selection" });
                     }}
                     className="rounded-full border border-red-200 bg-white px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50"
                   >
@@ -1625,10 +1677,10 @@ export default function Step3ImageGallery() {
         }}
       />
 
-      {confirmDeleteKeys ? (
+      {confirmDelete ? (
         <div
           className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setConfirmDeleteKeys(null)}
+          onClick={() => setConfirmDelete(null)}
           role="dialog"
           aria-modal="true"
         >
@@ -1636,16 +1688,20 @@ export default function Step3ImageGallery() {
             className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="text-sm font-semibold text-gray-900">确认删除 Step3 历史图片</div>
+            <div className="text-sm font-semibold text-gray-900">
+              {confirmDelete.scope === "group" ? "确认删除整组展示图？" : "确认删除 Step3 历史图片"}
+            </div>
             <p className="mt-2 text-sm text-gray-700">
-              将删除选中的 {confirmDeleteKeys.length} 张历史图片。已收藏（★）的图片会自动保留。确认继续吗？
+              {confirmDelete.scope === "group"
+                ? `将删除本组全部展示图（左侧主图与右侧全部视角，共 ${confirmDelete.keys.length} 张）。已收藏（★）的图片会自动保留。确认继续吗？`
+                : `将删除选中的 ${confirmDelete.keys.length} 张历史图片。已收藏（★）的图片会自动保留。确认继续吗？`}
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <BrandButton
                 type="button"
                 variant="outline"
                 shape="full"
-                onClick={() => setConfirmDeleteKeys(null)}
+                onClick={() => setConfirmDelete(null)}
                 className="h-[34px] px-4 text-sm"
               >
                 取消
@@ -1654,8 +1710,9 @@ export default function Step3ImageGallery() {
                 type="button"
                 variant="danger"
                 shape="full"
-                onClick={() => {
-                  const selectors = confirmDeleteKeys
+                onClick={async () => {
+                  const keys = confirmDelete.keys;
+                  const selectors = keys
                     .map((k) => imageByKey[k])
                     .filter((x): x is (typeof displayImages)[number] => !!x)
                     .map((x) => ({
@@ -1665,9 +1722,13 @@ export default function Step3ImageGallery() {
                       type: x.type,
                       createdAt: x.createdAt,
                     }));
-                  if (selectors.length) deleteGalleryHistoryImagesBySelectors(selectors);
-                  setSelectedImageKeys([]);
-                  setConfirmDeleteKeys(null);
+                  if (selectors.length) {
+                    const ok = await deleteGalleryHistoryImagesBySelectors(selectors);
+                    if (ok) setSelectedImageKeys([]);
+                  } else {
+                    setSelectedImageKeys([]);
+                  }
+                  setConfirmDelete(null);
                 }}
                 className="h-[34px] px-4 text-sm"
               >

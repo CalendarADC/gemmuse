@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 import type { GalleryImage, GalleryImageType } from "@/store/jewelryGeneratorStore";
 
@@ -46,13 +46,34 @@ function step3InputImageSovereigntyBlock(): string {
   ].join("\n\n");
 }
 
-/** ???????????????? ????? */
-function step3PendantBailTopologyLockBlock(): string {
+/** 穿戴图：init 仍是 SKU 真值，但不得沿用「仅换机位/台面静物」语义，否则会复刻 cushion/box 主图。 */
+function step3InputImageSovereigntyOnModelBlock(): string {
   return [
+    "STEP2 INIT — SKU AUTHORITY (on-model / wearing, overrides generic Step3 table-only wording): The init is the **exact manufacturable SKU** (motif, stones, metal, bail). For this brief you **must** introduce **real wearing context** (hand + finger for rings; neck + chain for pendants). **FAIL** if the output still reads as the **same catalog still-life** as the init (jewel alone on cushion / jewelry box / tray with **no wearer**).",
+    "LOCK without drift: same primary species or motif (e.g. same animal ? never swap cat for phoenix/rabbit/bird), same gemstone count, cuts, colors, and settings, same metal relief/filigree pattern and oxidation, same band width and topology.",
+    "FUNCTIONAL HARDWARE LOCK (strict): Any **bail, hanging loop, jump ring, or obvious chain connector** visible in the init image is part of the SKU. It must **survive** in the worn shot (partial occlusion OK). **Never remove, seal shut, merge into decorative rim, or replace with flat filigree** so the chain path disappears.",
+    "FORBID: alternate theme, substitute centerpiece, invented stones, different engraving, style remix, or 'improving' the design. If any USER TEXT conflicts with visible pixels in the init image, IGNORE that text for geometry and OBEY THE IMAGE.",
+    "COUNT LOCK (strict): The output must still depict exactly ONE jewelry body ? the same single piece as the input. Never expand into multiple rings side-by-side, a trio lineup, or extra duplicate rings/pendants in frame.",
+    buildSingleJewelryPieceOnlyConstraintBlock(),
+  ].join("\n\n");
+}
+
+/** ???????????????? ????? */
+function step3PendantBailTopologyLockBlock(onModel: boolean): string {
+  const shared = [
     "PENDANT ? BAIL / TOP CONNECTOR (strict, all Step3 product angles):",
     "The init image defines a **bail** (or jump ring / top hanger) attached above the motif. This is **mandatory manufacturing geometry**, not an optional flourish.",
     "Left/right/rear/front table shots: you **must still render that bail as solid metal** ? seen from the side, three-quarter, or back as appropriate. A partially hidden bail behind the head is OK; **a completely missing bail, bail absorbed into the outer filigree halo, or a sealed decorative disk with no through-opening** is NOT OK.",
     "Keep the **same attachment junction and similar loop scale** as the source; do not delete the top loop to simplify a lying-on-side silhouette.",
+  ];
+  if (onModel) {
+    return [
+      ...shared,
+      "ON-MODEL CHAIN (strict): **Render** a believable necklace **chain or cord** with natural drape and readable links (or a smooth leather cord if the brief implies it). The init may show **no chain pixels** ? infer a **matching metal chain** consistent with the pendant. Bail / jump ring stays solid and attached ? **FORBID** a bail **floating** with broken attachment to the topper; **FORBID** a slack collapsed bail that reads like a broken CAD hinge.",
+    ].join("\n");
+  }
+  return [
+    ...shared,
     "NO VISIBLE CHAIN ? CAD UPRIGHT BAIL (table / product shots): if the init shows **no necklace chain**, render the bail / jump ring **upright / plumb** along the stringing axis **as if tensioned from above** by a chain that is **implied only** ? **never draw chain links or cord**. **FORBID** a **slack / draped** bail collapsed on the motif like gravity-loose dead weight. **FORBID** a bail **floating** with broken attachment to the topper.",
   ].join("\n");
 }
@@ -195,7 +216,9 @@ export async function POST(req: Request) {
     const kind = inferJewelryProductKind(prompt);
 
     const baseKeepInstruction =
-      "IMAGE EDIT ONLY: Preserve the init image design bit-for-bit intent ? zero redesign. Same silhouette, same motif, same stones, same metal finish; only apply the requested camera/environment change.";
+      "IMAGE EDIT ONLY: Preserve the init image design bit-for-bit intent ? zero redesign. Same silhouette, same motif, same stones, same metal finish **and the same overall exposure / white balance / saturation / shadow depth as the init**; only apply the requested camera orbit. **FORBID** a global gray haze, flat low-contrast relight, or desaturated \"catalog re-grade\" vs the reference.";
+    const baseKeepInstructionOnModel =
+      "ON-MODEL IMAGE EDIT (strict): Preserve **SKU** from the init (motif, stone count/hue, metal relief, band/bail topology). You **must** change composition to **credible wearing** (hand/finger or neck+chain) per this brief. **FORBID** treating this as \"same tabletop still-life, relight only\".";
     // Step3 ???????????????? Step1 ????????????
     const keepMainBackgroundInstruction =
       [
@@ -254,24 +277,40 @@ export async function POST(req: Request) {
           ].join("\n")
         : "";
 
-    const pendantLeftRightViewFullBlock =
-      kind === "pendant"
-        ? [
-            "PENDANT ? LEFT/RIGHT CAMERA (critical ? do NOT output another frontal):",
-            pendantSideVsRearDisambiguation,
-            pendantConvexSideNoHollowMoldBlock,
-            "The init image is usually a near-frontal hero. This output must **NOT** be a second straight-on / orthographic front duplicate: the motif plane must **NOT** stay parallel to the camera like the main shot.",
-            "Rotate the viewpoint strongly to the requested side into a **three-quarter oblique side shot** (good reference: leopard/lion head pendant on velvet ? seen from above-side so you read snout/jaw **profile**, cheek plane, **metal thickness**, filigree depth, and the **bail loop from an angle** with its opening visible).",
-            "REQUIRE obvious **lateral information**: at least two of ? side profile of head/muzzle, flank relief, asymmetric ear/mane read, bail seen from the side, visible back vs front plane separation.",
-            "BAIL NON-NEGOTIABLE (side view): the **bail must remain a separate metal loop/volume** attached at the top (or same azimuth as the source), readable in side or 3/4 ? **never cropped off, never merged into the scalloped border, never deleted for a cleaner profile**.",
-            "BAIL ORIENTATION (no chain in frame): bail / jump ring reads **upright / vertically tensioned** (implied overhead chain pull) for CAD stringing clarity ? **still render zero chain**.",
-            "REST ON SURFACE (strict): same display fabric/tray as main image; **pendant body** **lies** on it with weight ? contact shadows, slight cloth compression. **Top bail** keeps the **upright chain-pull** read (no chain drawn). FORBID the **whole jewel** levitating with zero surface contact; FORBID a bolt-upright **statue** pose of the entire body if the main was a lying tabletop hero.",
-            "LYING POSE + CAMERA (strict): velvet/table pose is allowed, but the **camera must still sight the same outer convex hero relief** as the init, from a **left/right azimuth** ? **FORBID** arranging the piece so the **hollow molded reverse / concave back impression** faces the lens (that reads as wrong rear, not side).",
-            "FORBID: repeating the same frontal framing as the input; symmetric front mascot pose when the brief is left/right view.",
-          ].join("\n")
-        : "";
+    /** 吊坠左右须分文案：共用块曾导致左/右两次 img2img 输出近似镜像的同一 3/4。 */
+    const pendantLateralViewForSide = (side: "left" | "right"): string => {
+      if (kind !== "pendant") return "";
+      const isLeft = side === "left";
+      const orbitLabel = isLeft ? "COUNTERCLOCKWISE (CCW)" : "CLOCKWISE (CW)";
+      const clockPos = isLeft ? "9 o'clock" : "3 o'clock";
+      const flank = isLeft
+        ? "the jewelry's **physical LEFT flank** (subject-left tangent toward lens)"
+        : "the jewelry's **physical RIGHT flank** (subject-right tangent toward lens)";
+      const foreshortenHint = isLeft
+        ? "SILHOUETTE SHIFT vs hero (mandatory): features that sat on the **viewer's RIGHT** in the hero must read **more foreshortened / edge-on** here, while **viewer's LEFT** side of the motif gains **elongation and clearer depth** ? NOT a re-lit duplicate with the same left-right balance as the init."
+        : "SILHOUETTE SHIFT vs hero (mandatory): features that sat on the **viewer's LEFT** in the hero must read **more foreshortened / edge-on** here, while **viewer's RIGHT** side of the motif gains **elongation and clearer depth** ? NOT a re-lit duplicate with the same left-right balance as the init.";
+      const antiMirror = isLeft
+        ? "**ANTI-DUPLICATE (vs RIGHT orbit)**: **FORBID** an output that could pass as a **horizontal mirror** of a correct RIGHT shot for this SKU (same muzzle screen bearing, same cushion crop, only specular shift). CCW orbit must change **which** cheek, ear, and bail opening leg are dominant."
+        : "**ANTI-DUPLICATE (vs LEFT orbit)**: **FORBID** an output that could pass as a **horizontal mirror** of a correct LEFT shot for this SKU (same muzzle screen bearing, same cushion crop, only specular shift). CW orbit must change **which** cheek, ear, and bail opening leg are dominant.";
+      return [
+        `PENDANT ? **${isLeft ? "LEFT" : "RIGHT"} ORBIT ONLY** (this request is NOT the opposite side; do not split the difference):`,
+        pendantSideVsRearDisambiguation,
+        pendantConvexSideNoHollowMoldBlock,
+        `TOP-DOWN TABLE PLAN (mandatory): Top-down on the jewelry on the velvet: hero camera was at **12 o'clock** facing the primary design front. Move the camera to **${clockPos}** around the piece (${orbitLabel}, ~70°–110° arc) so ${flank} is materially closer to the lens and dominates new silhouette cues.`,
+        foreshortenHint,
+        antiMirror,
+        "The init image is usually a near-frontal hero. This output must **NOT** be a second straight-on / orthographic front duplicate: the motif plane must **NOT** stay parallel to the camera like the main shot.",
+        "Rotate the viewpoint strongly into a **three-quarter oblique side shot** (good reference: leopard/lion head pendant on velvet ? seen from above-side so you read snout/jaw **profile**, cheek plane, **metal thickness**, filigree depth, and the **bail loop from an angle** with its opening visible).",
+        "REQUIRE obvious **lateral information**: at least two of ? side profile of head/muzzle, flank relief, asymmetric ear/mane read, bail seen from the side, visible back vs front plane separation.",
+        "BAIL NON-NEGOTIABLE (side view): the **bail must remain a separate metal loop/volume** attached at the top (or same azimuth as the source), readable in side or 3/4 ? **never cropped off, never merged into the scalloped border, never deleted for a cleaner profile**.",
+        "BAIL ORIENTATION (no chain in frame): bail / jump ring reads **upright / vertically tensioned** (implied overhead chain pull) for CAD stringing clarity ? **still render zero chain**.",
+        "REST ON SURFACE (strict): same display fabric/tray as main image; **pendant body** **lies** on it with weight ? contact shadows, slight cloth compression. **Top bail** keeps the **upright chain-pull** read (no chain drawn). FORBID the **whole jewel** levitating with zero surface contact; FORBID a bolt-upright **statue** pose of the entire body if the main was a lying tabletop hero.",
+        "LYING POSE + CAMERA (strict): velvet/table pose is allowed, but the **camera must still sight the same outer convex hero relief** as the init, from a **left/right azimuth** ? **FORBID** arranging the piece so the **hollow molded reverse / concave back impression** faces the lens (that reads as wrong rear, not side).",
+        "FORBID: repeating the same frontal framing as the input; symmetric front mascot pose when the brief is left/right view.",
+      ].join("\n");
+    };
 
-    const pendantBailLock = kind === "pendant" ? step3PendantBailTopologyLockBlock() : "";
+    const pendantBailLock = kind === "pendant" ? step3PendantBailTopologyLockBlock(false) : "";
 
     const ringLeftRightViewFullBlock =
       kind === "ring"
@@ -320,8 +359,8 @@ export async function POST(req: Request) {
           ? [
               `[SHOT_KIND: ON_MODEL_WEARING — request ${runNonce}_wear] You MUST output a **hand-worn** studio photo (fingers + ring), **NOT** another identical tabletop frontal duplicate of the init.`,
               "COLOR / GRADE HARMONY: match the **metal warmth and overall color grade** of the init hero (same alloy read); background may be clean studio but must **not** invent a totally unrelated mood that makes the ring read as a different SKU.",
-              step3InputImageSovereigntyBlock(),
-              baseKeepInstruction,
+              step3InputImageSovereigntyOnModelBlock(),
+              baseKeepInstructionOnModel,
               "Generate an on-model shot where the ring is worn on a human hand in a studio product photography style.",
               ...(userWantsWomensRingOnModelPresentation(prompt)
                 ? [buildRingWomensOnModelLuxuryPresentationBlock()]
@@ -337,9 +376,9 @@ export async function POST(req: Request) {
           : [
               `[SHOT_KIND: ON_MODEL_WEARING — request ${runNonce}_wear] You MUST output a **neck/worn** crop with the **pendant on chain or cord visible as worn**, **NOT** a second flat tabletop duplicate of the init hero.`,
               "COLOR / GRADE HARMONY: keep **pendant metal and stone hues** consistent with the init reference.",
-              step3InputImageSovereigntyBlock(),
-              baseKeepInstruction,
-              pendantBailLock,
+              step3InputImageSovereigntyOnModelBlock(),
+              baseKeepInstructionOnModel,
+              step3PendantBailTopologyLockBlock(true),
               "Generate an on-model shot: necklace/pendant worn naturally (cropped framing, no face focus), studio product photography.",
               "FRAMING (strict): avoid over-tight local crop; keep enough upper-torso/neck context so the wearing presentation reads as a complete on-model view.",
               "Chain must drape naturally with gravity; chain links distinct and readable ? not a blurry rope.",
@@ -388,7 +427,7 @@ export async function POST(req: Request) {
           baseKeepInstruction,
           step3LeftRightGemstoneColorLockBlock(),
           pendantBailLock,
-          pendantLeftRightViewFullBlock,
+          pendantLateralViewForSide("left"),
           ringLeftRightViewFullBlock,
           "LEFT VIEW ? CAMERA ORBIT (strict): From the init **front hero**, orbit the camera **counterclockwise** around a **vertical axis through the jewelry** (top view): move ~**60?110?* toward the piece?s **left flank**. The **main relief / face / stones** must remain **visible in profile or three-quarter** ? this is **NOT** a ~180?rotation to the **flat reverse / back plate**, and **NOT** a **concave hollow-mold / negative impression** of the face (that is invalid).",
           "LEFT JOB ? ASYMMETRY (strict): vs. the init hero, the frame must favor **more visible metal/shank and setting on the camera-left** and **clearer foreshortening toward camera-right** (counterclockwise orbit read ? not a symmetric frontal).",
@@ -440,7 +479,7 @@ export async function POST(req: Request) {
           baseKeepInstruction,
           step3LeftRightGemstoneColorLockBlock(),
           pendantBailLock,
-          pendantLeftRightViewFullBlock,
+          pendantLateralViewForSide("right"),
           ringLeftRightViewFullBlock,
           "RIGHT VIEW ? CAMERA ORBIT (strict): From the init **front hero**, orbit **clockwise** around the **vertical axis** ~**60?110?* toward the piece?s **right flank**. **Relief / motif must stay visible** in profile or 3/4 ? **NOT** the undecorated back surface facing the lens, and **NOT** a **concave hollow-mold / negative impression** of the face.",
           "RIGHT JOB ? ASYMMETRY (strict): vs. the init hero, the frame must favor **more visible metal/shank and setting on the camera-right** and **clearer foreshortening toward camera-left** (clockwise orbit read ? not a symmetric frontal).",

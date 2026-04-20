@@ -269,7 +269,8 @@ type JewelryGeneratorStore = {
   toggleGalleryHistoryFavoriteBySelector: (selector: GalleryImageSelector) => void;
   /** 成功更新本地（且云端删除成功或无需删云端）时返回 true */
   deleteMainHistoryImagesByIds: (ids: string[]) => Promise<boolean>;
-  deleteGalleryHistoryImagesBySelectors: (selectors: GalleryImageSelector[]) => void;
+  /** 先删云端 GeneratedImage，再更新本地；否则下次同步会把已删图并回（见 mergeGalleryDedupe） */
+  deleteGalleryHistoryImagesBySelectors: (selectors: GalleryImageSelector[]) => Promise<boolean>;
 
   // 从历史集合中切换到指定 setId 对应的当前集合（用于 Step4）
   setGallerySetAsCurrent: (setId: string) => void;
@@ -445,6 +446,106 @@ function clearTaskPromptBackup(taskId: string) {
   } catch {
     /* ignore */
   }
+}
+
+/** 防止快速连续点击时，较早发起的 switchTask 在 await 之后覆盖较晚选择的目标任务。 */
+let switchTaskHeadId: string | null = null;
+
+type TaskSwitchDerived = {
+  promptForTask: string;
+  selectedMainImageId: string | null;
+  selectedMainImageIds: string[];
+  primaryImg: MainImage | undefined;
+};
+
+function deriveTaskSwitchFields(
+  loaded: TaskIdbPayload,
+  taskId: string,
+  tasks: GeneratorTask[]
+): TaskSwitchDerived {
+  const targetTask = tasks.find((t) => t.id === taskId);
+  const promptForTask =
+    loaded.meta.prompt.trim() ||
+    (targetTask?.lastSuccessPrompt?.trim() ?? "") ||
+    readTaskPromptBackup(taskId).trim() ||
+    "";
+  const mainIdSet = new Set([
+    ...loaded.mainImages.map((m) => m.id),
+    ...loaded.mainHistoryImages.map((m) => m.id),
+  ]);
+  let selectedMainImageId = loaded.meta.selectedMainImageId;
+  let selectedMainImageIds = loaded.meta.selectedMainImageIds.filter((id) => mainIdSet.has(id));
+  if (selectedMainImageId && !mainIdSet.has(selectedMainImageId)) {
+    selectedMainImageId =
+      loaded.mainImages[0]?.id ?? loaded.mainHistoryImages[0]?.id ?? null;
+  }
+  if (!selectedMainImageIds.length && selectedMainImageId) {
+    selectedMainImageIds = [selectedMainImageId];
+  }
+  const primaryImg = selectedMainImageId
+    ? loaded.mainImages.find((x) => x.id === selectedMainImageId) ??
+      loaded.mainHistoryImages.find((x) => x.id === selectedMainImageId)
+    : undefined;
+  return { promptForTask, selectedMainImageId, selectedMainImageIds, primaryImg };
+}
+
+function buildSwitchedWorkspacePatch(
+  taskId: string,
+  loaded: TaskIdbPayload,
+  tasks: GeneratorTask[],
+  derived: TaskSwitchDerived
+): Partial<JewelryGeneratorStore> {
+  const now = new Date().toISOString();
+  return {
+    activeTaskId: taskId,
+    status: idleGeneratorStatus(),
+    provider: loaded.meta.provider,
+    prompt: derived.promptForTask,
+    count: clampCount(loaded.meta.count),
+    step1BananaImageModel: resolvedStep1BananaImageModel(loaded.meta),
+    step2BananaImageModel: resolvedStep2BananaImageModel(loaded.meta),
+    step1ExpansionStrength: loaded.meta.step1ExpansionStrength,
+    step1FastMode: loaded.meta.step1FastMode,
+    step2FastMode: loaded.meta.step2FastMode,
+    selectedMainImageId: derived.selectedMainImageId,
+    selectedMainImageUrl: derived.primaryImg?.url ?? null,
+    selectedMainImageIds: derived.selectedMainImageIds,
+    copywriting: loaded.meta.copywriting,
+    lastTextModelUsed: loaded.meta.lastTextModelUsed,
+    lastImageCountPassed: loaded.meta.lastImageCountPassed,
+    mainImages: loaded.mainImages,
+    mainHistoryImages: loaded.mainHistoryImages,
+    galleryImages: loaded.galleryImages,
+    galleryHistoryImages: loaded.galleryHistoryImages,
+    // 参考图是 Step1 当前编辑态，不跟随任务工作区持久化；切任务时清空，避免串到别的任务。
+    step1ReferenceImageDataUrls: [],
+    error: null,
+    tasks: tasks.map((t) => (t.id === taskId ? { ...t, updatedAt: now } : t)),
+  };
+}
+
+function commitSwitchedTaskWorkspace(
+  set: (partial: Partial<JewelryGeneratorStore>) => void,
+  taskId: string,
+  loaded: TaskIdbPayload,
+  tasks: GeneratorTask[]
+) {
+  const derived = deriveTaskSwitchFields(loaded, taskId, tasks);
+  flushTaskPromptBackup(taskId, derived.promptForTask);
+  set(buildSwitchedWorkspacePatch(taskId, loaded, tasks, derived));
+  void saveTaskToIdb(taskId, {
+    meta: {
+      ...loaded.meta,
+      prompt: derived.promptForTask,
+      selectedMainImageId: derived.selectedMainImageId,
+      selectedMainImageUrl: derived.primaryImg?.url ?? null,
+      selectedMainImageIds: derived.selectedMainImageIds,
+    },
+    mainImages: loaded.mainImages,
+    mainHistoryImages: loaded.mainHistoryImages,
+    galleryImages: loaded.galleryImages,
+    galleryHistoryImages: loaded.galleryHistoryImages,
+  }).catch(() => undefined);
 }
 
 /**
@@ -695,7 +796,6 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           mainHistoryImages: loaded.mainHistoryImages,
           galleryImages: loaded.galleryImages,
           galleryHistoryImages: loaded.galleryHistoryImages,
-          step1ReferenceImageDataUrls: [],
           error: null,
         });
         void saveTaskToIdb(taskId, {
@@ -796,78 +896,44 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
 
         flushDebouncedTaskMetaSave();
         flushTaskPromptBackup(s.activeTaskId, s.prompt);
+        switchTaskHeadId = taskId;
+
+        let loaded: TaskIdbPayload;
         try {
-          await persistActiveWorkspace(s);
+          const [, loadedFromIdb] = await Promise.all([
+            persistActiveWorkspace(s),
+            loadTaskFromIdb(taskId),
+          ]);
+          loaded = loadedFromIdb;
         } catch {
-          /* ignore */
+          try {
+            await persistActiveWorkspace(s);
+          } catch {
+            /* ignore */
+          }
+          loaded = await loadTaskFromIdb(taskId);
         }
 
-        let loaded = await loadTaskFromIdb(taskId);
-        const serverWorkspace = await fetchTaskWorkspaceFromServer(taskId);
-        loaded = mergeTaskWorkspaceWithServer(loaded, serverWorkspace);
-        const targetTask = s.tasks.find((t) => t.id === taskId);
-        const promptForTask =
-          loaded.meta.prompt.trim() ||
-          (targetTask?.lastSuccessPrompt?.trim() ?? "") ||
-          readTaskPromptBackup(taskId).trim() ||
-          "";
-        flushTaskPromptBackup(taskId, promptForTask);
-        const mainIdSet = new Set([
-          ...loaded.mainImages.map((m) => m.id),
-          ...loaded.mainHistoryImages.map((m) => m.id),
-        ]);
-        let selectedMainImageId = loaded.meta.selectedMainImageId;
-        let selectedMainImageIds = loaded.meta.selectedMainImageIds.filter((id) => mainIdSet.has(id));
-        if (selectedMainImageId && !mainIdSet.has(selectedMainImageId)) {
-          selectedMainImageId =
-            loaded.mainImages[0]?.id ?? loaded.mainHistoryImages[0]?.id ?? null;
-        }
-        if (!selectedMainImageIds.length && selectedMainImageId) {
-          selectedMainImageIds = [selectedMainImageId];
-        }
-        const primaryImg = selectedMainImageId
-          ? loaded.mainImages.find((x) => x.id === selectedMainImageId) ??
-            loaded.mainHistoryImages.find((x) => x.id === selectedMainImageId)
-          : null;
-        const now = new Date().toISOString();
-        set({
-          activeTaskId: taskId,
-          status: idleGeneratorStatus(),
-          provider: loaded.meta.provider,
-          prompt: promptForTask,
-          count: clampCount(loaded.meta.count),
-          step1BananaImageModel: resolvedStep1BananaImageModel(loaded.meta),
-          step2BananaImageModel: resolvedStep2BananaImageModel(loaded.meta),
-          step1ExpansionStrength: loaded.meta.step1ExpansionStrength,
-          step1FastMode: loaded.meta.step1FastMode,
-          step2FastMode: loaded.meta.step2FastMode,
-          selectedMainImageId,
-          selectedMainImageUrl: primaryImg?.url ?? null,
-          selectedMainImageIds,
-          copywriting: loaded.meta.copywriting,
-          lastTextModelUsed: loaded.meta.lastTextModelUsed,
-          lastImageCountPassed: loaded.meta.lastImageCountPassed,
-          mainImages: loaded.mainImages,
-          mainHistoryImages: loaded.mainHistoryImages,
-          galleryImages: loaded.galleryImages,
-          galleryHistoryImages: loaded.galleryHistoryImages,
-          step1ReferenceImageDataUrls: [],
-          error: null,
-          tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, updatedAt: now } : t)),
-        });
-        void saveTaskToIdb(taskId, {
-          meta: {
-            ...loaded.meta,
-            prompt: promptForTask,
-            selectedMainImageId,
-            selectedMainImageUrl: primaryImg?.url ?? null,
-            selectedMainImageIds,
-          },
-          mainImages: loaded.mainImages,
-          mainHistoryImages: loaded.mainHistoryImages,
-          galleryImages: loaded.galleryImages,
-          galleryHistoryImages: loaded.galleryHistoryImages,
-        }).catch(() => undefined);
+        if (switchTaskHeadId !== taskId) return;
+        commitSwitchedTaskWorkspace(set, taskId, loaded, get().tasks);
+
+        void (async () => {
+          const serverWorkspace = await fetchTaskWorkspaceFromServer(taskId);
+          if (serverWorkspace === null) return;
+          if (switchTaskHeadId !== taskId) return;
+          const cur = get();
+          if (cur.activeTaskId !== taskId) return;
+          const localPayload: TaskIdbPayload = {
+            meta: pickTaskMeta(cur),
+            mainImages: cur.mainImages,
+            mainHistoryImages: cur.mainHistoryImages,
+            galleryImages: cur.galleryImages,
+            galleryHistoryImages: cur.galleryHistoryImages,
+          };
+          const merged = mergeTaskWorkspaceWithServer(localPayload, serverWorkspace);
+          if (switchTaskHeadId !== taskId) return;
+          commitSwitchedTaskWorkspace(set, taskId, merged, get().tasks);
+        })();
       },
 
       renameTask: (taskId, name) => {
@@ -1494,46 +1560,48 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             return false;
           }
 
-          const merged: GalleryImage[] = [];
+          // 不同主图互不依赖：并行请求 /api/enhance，总耗时常接近「最慢那一张」而非逐张相加。
+          // （单次 enhance 内多角度仍由服务端串行 img2img，见 route 注释。）
+          const perMainBatches = await Promise.all(
+            selectedItems.map(async (item) => {
+              const res = await fetch("/api/enhance", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  provider,
+                  taskId: activeTaskId,
+                  prompt,
+                  fastMode: step2FastMode,
+                  bananaImageModel: step2BananaImageModel,
+                  selectedMainImageId: item.id,
+                  selectedMainImageUrl: item.url,
+                  onModel,
+                  left,
+                  right,
+                  rear,
+                  front: !!front,
+                }),
+              });
 
-          for (const item of selectedItems) {
-            const res = await fetch("/api/enhance", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              provider,
-              taskId: activeTaskId,
-              prompt,
-              fastMode: step2FastMode,
-              bananaImageModel: step2BananaImageModel,
-              selectedMainImageId: item.id,
-              selectedMainImageUrl: item.url,
-              onModel,
-              left,
-              right,
-              rear,
-              front: !!front,
-            }),
-            });
+              if (!res.ok) {
+                const data = (await res.json().catch(() => null)) as ApiError | null;
+                const serverMsg =
+                  typeof data?.message === "string" && data.message.trim()
+                    ? data.message.trim()
+                    : "";
+                throw new Error(serverMsg || `增强失败（HTTP ${res.status}）`);
+              }
 
-            if (!res.ok) {
-              const data = (await res.json().catch(() => null)) as ApiError | null;
-              const serverMsg =
-                typeof data?.message === "string" && data.message.trim()
-                  ? data.message.trim()
-                  : "";
-              throw new Error(serverMsg || `增强失败（HTTP ${res.status}）`);
-            }
-
-            const data = (await res.json()) as { galleryImages: GalleryImage[] };
-            const raw = data.galleryImages ?? [];
-            const nextImages: GalleryImage[] = raw.map((img) => ({
-              ...img,
-              setId,
-              setCreatedAt,
-            }));
-            merged.push(...nextImages);
-          }
+              const data = (await res.json()) as { galleryImages: GalleryImage[] };
+              const raw = data.galleryImages ?? [];
+              return raw.map((img) => ({
+                ...img,
+                setId,
+                setCreatedAt,
+              }));
+            })
+          );
+          const merged: GalleryImage[] = perMainBatches.flat();
 
           set({
             galleryImages: merged,
@@ -1916,18 +1984,60 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         return true;
       },
 
-      deleteGalleryHistoryImagesBySelectors: (selectors) => {
+      deleteGalleryHistoryImagesBySelectors: async (selectors) => {
         const selectorKeys = new Set(
           selectors.map((s) => galleryImageSelectorKey(s))
         );
         const idSet = new Set(selectors.map((s) => s.id));
         const matchSelector = (x: GalleryImage) =>
           selectorKeys.has(galleryImageSelectorKey(x));
+
+        const snapshot = get();
+        const taskId = snapshot.activeTaskId?.trim() ?? "";
+        const serverIds = new Set<string>();
+        for (const x of snapshot.galleryHistoryImages) {
+          if (x.isFavorite) continue;
+          if (matchSelector(x)) serverIds.add(x.id);
+        }
+        for (const x of snapshot.galleryImages) {
+          if (idSet.has(x.id)) serverIds.add(x.id);
+        }
+        const idsArr = [...serverIds].filter((id) => typeof id === "string" && id.length > 0);
+        const WORKSPACE_DELETE_CHUNK = 48;
+
+        if (taskId && idsArr.length) {
+          try {
+            for (let i = 0; i < idsArr.length; i += WORKSPACE_DELETE_CHUNK) {
+              const chunk = idsArr.slice(i, i + WORKSPACE_DELETE_CHUNK);
+              const res = await fetch(
+                `/api/tasks/${encodeURIComponent(taskId)}/workspace/images`,
+                {
+                  method: "DELETE",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ ids: chunk }),
+                }
+              );
+              if (!res.ok) {
+                const data = (await res.json().catch(() => ({}))) as { message?: string };
+                set({
+                  error:
+                    typeof data.message === "string"
+                      ? data.message
+                      : "云端删除展示图失败，刷新后仍可能出现已删图片，请稍后再试。",
+                });
+                return false;
+              }
+            }
+          } catch {
+            set({ error: "云端删除展示图失败，请检查网络后重试。" });
+            return false;
+          }
+        }
+
         set((state) => {
           const nextGalleryHistoryImages = state.galleryHistoryImages.filter(
             (x) => x.isFavorite || !matchSelector(x)
           );
-          // 当前集合中的项目通常 id 唯一，按 id 删除可兼容历史调用场景
           const nextGalleryImages = state.galleryImages.filter((x) => !idSet.has(x.id));
           return {
             galleryHistoryImages: nextGalleryHistoryImages,
@@ -1936,6 +2046,14 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             error: null,
           };
         });
+        const s2 = get();
+        if (tasksHydrated) scheduleDebouncedTaskMetaSave(s2.activeTaskId, pickTaskMeta(s2));
+        try {
+          await persistActiveWorkspace(s2);
+        } catch {
+          /* ignore */
+        }
+        return true;
       },
 
       setCopywriting: (next) => {

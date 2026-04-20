@@ -85,9 +85,26 @@ async function updateUser(formData: FormData) {
   revalidatePath("/admin/users");
 }
 
+type AdminUserRow = {
+  id: string;
+  name: string | null;
+  email: string;
+  role: "ADMIN" | "USER";
+  status: "PENDING" | "ACTIVE" | "DISABLED" | "REJECTED";
+  createdAt: Date;
+  desktopDevices: Array<{
+    id: string;
+    deviceName: string | null;
+    status: string;
+    updatedAt: Date;
+    approvedAt: Date | null;
+    revokedAt: Date | null;
+  }>;
+};
+
 export default async function AdminUsersPage() {
   const me = await requireAdminUser();
-  const users = await prisma.user.findMany({
+  const userRows = await prisma.user.findMany({
     orderBy: [{ createdAt: "desc" }],
     select: {
       id: true,
@@ -96,19 +113,59 @@ export default async function AdminUsersPage() {
       role: true,
       status: true,
       createdAt: true,
-      desktopDevices: {
+    },
+  });
+
+  const devicesByUserId = new Map<
+    string,
+    Array<{
+      id: string;
+      deviceName: string | null;
+      status: string;
+      updatedAt: Date;
+      approvedAt: Date | null;
+      revokedAt: Date | null;
+    }>
+  >();
+  if (userRows.length) {
+    try {
+      const allDevices = await prisma.desktopDevice.findMany({
+        where: { userId: { in: userRows.map((u) => u.id) } },
         orderBy: [{ updatedAt: "desc" }],
         select: {
           id: true,
+          userId: true,
           deviceName: true,
           status: true,
           updatedAt: true,
           approvedAt: true,
           revokedAt: true,
         },
-      },
-    },
-  });
+      });
+      for (const d of allDevices) {
+        const list = devicesByUserId.get(d.userId) ?? [];
+        list.push({
+          id: d.id,
+          deviceName: d.deviceName,
+          status: d.status,
+          updatedAt: d.updatedAt,
+          approvedAt: d.approvedAt,
+          revokedAt: d.revokedAt,
+        });
+        devicesByUserId.set(d.userId, list);
+      }
+    } catch (err) {
+      console.warn(
+        "[admin/users] DesktopDevice 不可用（数据库未执行 prisma migrate/db push）。桌面设备列为空。",
+        err
+      );
+    }
+  }
+
+  const users: AdminUserRow[] = userRows.map((u) => ({
+    ...u,
+    desktopDevices: devicesByUserId.get(u.id) ?? [],
+  }));
 
   return (
     <main className="p-6 md:p-10">

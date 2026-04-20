@@ -289,11 +289,17 @@ export function mergeTaskWorkspaceWithServer(
 }
 
 export async function fetchTaskWorkspaceFromServer(taskId: string): Promise<ServerWorkspaceJson | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
-    const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/workspace`);
+    const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/workspace`, {
+      signal: controller.signal,
+    });
     if (!res.ok) return null;
     return (await res.json()) as ServerWorkspaceJson;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }

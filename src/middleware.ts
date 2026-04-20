@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
+import { getAuthSecret } from "@/lib/authSecret";
+
 const PUBLIC_PATHS = new Set(["/", "/login", "/register", "/pending"]);
 
 function isPublicPath(pathname: string): boolean {
@@ -27,7 +29,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  const token = await getToken({ req, secret: process.env.AUTH_SECRET });
+  const token = await getToken({ req, secret: getAuthSecret() });
   const isLoggedIn = !!token?.sub;
   const status = (token?.status as string | undefined) ?? "";
   const role = (token?.role as string | undefined) ?? "";

@@ -1,5 +1,9 @@
+import { config as loadEnv } from "dotenv";
 import { hash } from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
+
+loadEnv({ path: ".env" });
+loadEnv({ path: ".env.local", override: true });
 
 const prisma = new PrismaClient();
 

@@ -81,8 +81,9 @@ export function appendKeywordBoosters(prompt: string): string {
     parts.push("ring shape, circular band, jewelry loop");
   }
   if (/necklace|pendant|chain|链条|吊坠|项链/.test(pl)) {
-    // Step1：本体 + bail；不画链；bail 竖直提拉态便于建模
-    parts.push("pendant shape, bail, hanging loop, upright bail (implied overhead chain tension), no chain visible");
+    parts.push(
+      "pendant body + bail only, upright bail plumb axis, implied off-camera pull, absolutely zero necklace chain or links visible in frame"
+    );
   }
   if (!parts.length) return "";
   return ", " + parts.join(", ");
@@ -376,15 +377,29 @@ const GLOBAL_NEGATIVE_TAIL_LINES = [
  * 全局负面约束。若用户在 prompt 中明确要求木质台面/木纹/石材等环境，则不得再禁止「木」，
  * 否则会把「深色老橡木桌面」等需求与默认棚拍逻辑一起冲掉。
  */
-export function buildGlobalNegativePromptBlock(prompt: string): string {
+export function buildGlobalNegativePromptBlock(
+  prompt: string,
+  opts?: { onModel?: boolean; pendantProductNoChain?: boolean }
+): string {
   const surfaceOk = userExplicitEnvironmentOrSurfaceInPrompt(prompt);
   const propClause = surfaceOk
     ? "unrelated freestanding ceramic figurines or random decorative wood crates as separate props (NOT the user-requested tabletop/surface); if the user described oak/wood grain/marble/fabric table or environment, render that faithfully — do NOT replace with seamless gray/white studio sweep."
     : "wood or ceramic props,";
+  const onModel = !!opts?.onModel;
+  const wearingFailure =
+    onModel
+      ? " **WEARING-BRIEF FAILURE to avoid:** jewelry still framed like the init **tabletop catalog still-life** (piece alone on cushion / jewelry box / tray as the hero) with **no visible finger, hand, neck, or chain-on-body context** when the shot is on-model."
+      : "";
+  const pendantNoChain =
+    !onModel && !!opts?.pendantProductNoChain
+      ? " **PENDANT / NECKLACE PRODUCT HERO — NO CHAIN (strict):** any visible **necklace chain, chain links, cable/snake/rolo links, cord, string, or leather lace** passing through the bail or entering from the **top edge** of the frame; chain continuation above bail; \"half chain\" peeking in; jewelry photography where the hero is clearly **on-chain** instead of **body + bail only**."
+      : "";
   const head =
     "NEGATIVE CONSTRAINTS (strictly avoid): multiple unrelated products in one hero shot, multiple salient jewelry pieces in one frame (e.g. three rings side-by-side on leather, row of rings, several pendants in one shot), jewelry collection / multi-SKU lineup, collage layout, photo grid, split screen, multi-panel montage, tiled frames (2x2 / 3x3 / NxN), storyboard layout, contact sheet, diptych/triptych, before-after split, picture-in-picture, any readable text, watermark, signature, logo, human face in frame, deformed or twisted fingers, plastic or resin toy look, " +
     propClause +
-    " matte dull flat metal with no highlights, flat lighting with no reflections, blurry output, low resolution, clutter objects, jewelry presentation box as prop, extra earrings or bracelets unless the text prompt explicitly requests a matching set.";
+    " matte dull flat metal with no highlights, flat lighting with no reflections, blurry output, low resolution, clutter objects, jewelry presentation box as prop, extra earrings or bracelets unless the text prompt explicitly requests a matching set." +
+    wearingFailure +
+    pendantNoChain;
   return [head, ...GLOBAL_NEGATIVE_TAIL_LINES].join("\n");
 }
 
@@ -422,6 +437,7 @@ export function buildRingPhysicalBlock(
  */
 export function buildPendantNecklaceHeroPresentationEnBlock(): string {
   return [
+    "**ABSOLUTE — NO CHAIN IN PRODUCT / CAD HERO (non-wearing):** Do **NOT** render necklace chain, cord, string, leather lace, or **any** repeating link pattern (cable, rolo, snake, Figaro, etc.). Do **NOT** show links passing through the bail or entering from the **top** of the frame. The **bail / jump ring** is the **only** upward metal past the motif; above it = **empty backdrop only**. Implied overhead pull is OK; **visible chain is always wrong** for this shot type.",
     "PENDANT / NECKLACE — 3D HERO + PRESENTATION (strict): Every pendant/charm must read as a fully sculpted 3D jewelry mass with believable wall thickness, relief depth, and undercuts — NOT a flat stamped coin, NOT a smooth paper-thin silhouette with no depth.",
     "Rear / back views must still communicate solid volumetric form; forbid a pancake-flat back with zero curvature unless the user explicitly requests that rear style.",
     "PRODUCT + CAD BAIL PRESENTATION (no necklace chain in frame unless on-model): BEFORE locking composition, infer whether this motif can realistically freestand on the tabletop without tipping (stable base / feet / broad bottom).",
@@ -441,6 +457,7 @@ export function buildChinesePendantNecklacePresentationBlock(): string {
     "不可直立场景：采用「图1」式陈列——主体须依靠首饰盒立面、绒布垫/展示块侧壁等**明确可见的支撑物**承托完成平衡；bail 仍须遵守**竖直提拉、不画链**的同一规则（凡可见处）。",
     "错误示例「图2」（严禁）：在无法自然直立的前提下，用尖角/窄边/单点支撑「立」在台面上且无任何背景依靠；**主体**呈明显不稳、现实中会倾倒的摆法；或封死/省略 bail、看不到可穿链的开孔。",
     "凡无链入镜的吊坠/项链主图与多视角：bail/活动环以**竖立、可穿链**为默认读法，便于工业建模；仍禁止画出链条本体；禁止无开孔的死封装饰替代真实挂环。",
+    "【绝对禁止画链】参考图若带项链：必须忽略链条，不得复刻；画面顶部不得出现任何链节、绳段从画幅外穿入 bail。",
   ].join("\n");
 }
 
@@ -448,16 +465,16 @@ export function buildPendantPhysicalBlock(onModel: boolean): string {
   const lines = [
     "PHYSICAL PRODUCTION (PENDANT / NECKLACE) — manufacturability:",
     "- Bail / connector: functional bail with a clearly open path for chain (bail hole or slit visibly pass-through); NOT a dead sealed knot, NOT a solid ring with no chain entry.",
-    buildPendantNecklaceHeroPresentationEnBlock(),
   ];
-  if (!onModel) {
-    lines.push(
-      "- BAIL — CAD UPRIGHT, NO CHAIN IN FRAME (strict): hero shows pendant body + bail only (render **zero** necklace chain / zero chain links). The bail / teardrop loop / jump ring must read **upright and vertically tensioned** along the stringing axis **as if an overhead chain pulls it straight** — chain is **implied only**, never drawn. **REQUIRE** a clearly **pass-through** opening for stringing and solid junction metal. **FORBID** a **slack / draped** bail lying flat on the motif like gravity-loose dead weight. **FORBID** a bail **floating** with broken or ambiguous attachment to the topper."
-    );
-  }
   if (onModel) {
     lines.push(
+      "ON-MODEL PENDANT (strict): **ignore** freestanding tabletop / Fig.3 cushion-hero rules for THIS shot — output must match a **worn** necklace/pendant brief (chain allowed, body context). Preserve **SKU topology** (motif, bail, stones) from the init; composition may change to wearing.",
       "- Chain (if visible): natural drape under gravity; individual chain links readable — NOT a single blurry rope or smeared tube."
+    );
+  } else {
+    lines.push(buildPendantNecklaceHeroPresentationEnBlock());
+    lines.push(
+      "- BAIL — CAD UPRIGHT, NO CHAIN IN FRAME (strict): hero shows pendant body + bail only (render **zero** necklace chain / zero chain links). The bail / teardrop loop / jump ring must read **upright and vertically tensioned** along the stringing axis **as if an overhead chain pulls it straight** — chain is **implied only**, never drawn. **REQUIRE** a clearly **pass-through** opening for stringing and solid junction metal. **FORBID** a **slack / draped** bail lying flat on the motif like gravity-loose dead weight. **FORBID** a bail **floating** with broken or ambiguous attachment to the topper."
     );
   }
   return lines.join("\n");
@@ -465,25 +482,53 @@ export function buildPendantPhysicalBlock(onModel: boolean): string {
 
 export function buildMaterialLightingBlock(
   promptLower: string,
-  isSterling925: boolean
+  isSterling925: boolean,
+  /** 穿戴图若仍写「macro product」会强烈把模型拉回台面静物，必须与 on-model 分支区分 */
+  context: "product_table" | "on_model" = "product_table",
+  /**
+   * Step3 `/api/enhance` img2img：主图已定影调与做旧层次，若仍套 Step1 的「高抛光银」等默认，
+   * 模型常把多视角拉成发灰、低对比的「目录片」——此处改为跟随 init 的材质读法。
+   */
+  forEnhanceFromInit = false
 ): string {
   const wantsVintageOxidized = /(oxid|oxidized|patina|vintage|antique|gothic|做旧|复古|暗黑)/i.test(
     promptLower
   );
+  const lensLine =
+    context === "on_model"
+      ? "editorial on-model jewelry photography: believable hand skin + ring metal; sharp focus on the worn piece; natural subsurface scatter on skin — NOT a tabletop macro packshot with no wearer."
+      : forEnhanceFromInit
+        ? "macro product photography **in the same lighting/color family as the init reference**; sharp focus on fine metal texture; preserve highlight warmth and shadow depth from the hero frame."
+        : "macro product photography; sharp focus on fine metal texture;";
   const lines = [
     "MATERIAL & LIGHTING (reject plastic / toy look):",
-    "macro product photography; sharp focus on fine metal texture;",
+    lensLine,
     "crisp specular highlights and ray-tracing-like realistic reflections.",
     "Gemstone: use prong setting OR bezel setting where appropriate; stone must appear mechanically seated in metal — NO floating stone detached from metal.",
     "Avoid: plastic sheen, flat ambient-only lighting, dull gray paste metal.",
-    wantsVintageOxidized
-      ? "If antique/oxidized style is requested: oxidation must be controlled and intentional only in recesses; no dirty rust-like blotches, no peeling, no random discoloration."
-      : "Metal finish must be clean and production-grade: no rust, no corrosion, no random oxidation stains, no faded/patchy plating, no dirty discoloration.",
   ];
+  if (forEnhanceFromInit) {
+    lines.push(
+      "IMG2IMG FINISH LOCK: **Do not re-master** metal or gems vs the init. Preserve micro-contrast in recesses and highlight sparkle intensity. FORBID global lift/gamma that washes shadows into gray fog or desaturates colored stones/pearls."
+    );
+    lines.push(
+      "Corrosion / dirt negatives apply only to **new artifacts** — do NOT remove intentional dark oxidation in grooves or patina that already reads in the init."
+    );
+  } else {
+    lines.push(
+      wantsVintageOxidized
+        ? "If antique/oxidized style is requested: oxidation must be controlled and intentional only in recesses; no dirty rust-like blotches, no peeling, no random discoloration."
+        : "Metal finish must be clean and production-grade: no rust, no corrosion, no random oxidation stains, no faded/patchy plating, no dirty discoloration."
+    );
+  }
   const silverish =
     isSterling925 || /silver|sterling|银/.test(promptLower);
   if (silverish) {
-    if (wantsVintageOxidized) {
+    if (forEnhanceFromInit) {
+      lines.push(
+        "Silver / white-metal (init-locked): keep the **same** polished vs antiqued cavity contrast, specular width, and tonal warmth as the init — NOT a forced upgrade to mirror-bright catalog silver unless the init already reads that way."
+      );
+    } else if (wantsVintageOxidized) {
       lines.push(
         "Silver: believable oxidized / antiqued recesses with controlled bright highlights on raised metal (where style fits)."
       );
@@ -494,6 +539,21 @@ export function buildMaterialLightingBlock(
     }
   }
   return lines.join("\n");
+}
+
+/** Step3 enhance：强制多视角与主图同套影调，避免软限制里的「棚拍默认」冲淡 init。 */
+export function buildEnhanceInitToneLockBlock(onModel: boolean): string {
+  if (onModel) {
+    return [
+      "INIT TONE HARMONY (on-model Step3): keep **SKU metal hue, stone saturation, and overall contrast** consistent with the init reference; avoid milky global haze or desaturation vs the hero.",
+    ].join("\n");
+  }
+  return [
+    "INIT PHOTOMASTER MATCH (table / box Step3 — absolute): The init defines the **target grade**. **Lock** exposure, white balance, saturation, shadow depth, highlight rolloff, cushion/fabric hue, and wood warmth so this reads as **the same photo session** as the hero — **only** the camera bearing changes.",
+    "METAL / PATINA: match the init's **exact** metal read (including dark recess oxidation, brushed vs polish mix, micro-contrast). FORBID re-grading into flat neutral gray, low-contrast \"AI packshot\", or forced mirror polish upgrade.",
+    "GEMS / PEARLS / ACCENTS: keep **hue and saturation** aligned with the init — no pastel washing, no gray veil over pinks or moonstones.",
+    "FORBID beauty-filter haze, global lift that crushes mood, or swapping warm velvet/cream for cool gray seamless. FORBID \"clean up\" relights that dull the piece vs the main view.",
+  ].join("\n\n");
 }
 
 export function buildMainImageCompositionBlock(
@@ -592,6 +652,11 @@ export function buildReferenceFusionBlock(refCount: number, prompt: string): str
   lines.push(
     "If reference looks like third-party catalog shots: strip watermark, logo, and brand text; keep only the jewelry design vocabulary."
   );
+  if (inferJewelryProductKind(prompt) === "pendant") {
+    lines.push(
+      "PENDANT / NECKLACE — REFERENCE OVERRIDE (strict): reference images may show a **real worn chain**; for this **product / CAD hero** you must **NOT copy or render any chain**. Reconstruct **pendant body + bail only**; bail **upright / plumb** as if pulled by off-camera tension. **FORBID** chain links, cord, or repeated links through the bail or dropping from the **top** of the frame — even if the reference clearly shows them."
+    );
+  }
   return lines.join("\n");
 }
 
@@ -607,9 +672,32 @@ export function buildEnhanceSoftLimitSuffix(
     kind === "ring"
       ? buildRingPhysicalBlock("enhance", onModel)
       : buildPendantPhysicalBlock(onModel);
-  return [physical, buildMaterialLightingBlock(pl, is925), buildGlobalNegativePromptBlock(prompt)].join(
-    "\n\n"
-  );
+  const toneLock = buildEnhanceInitToneLockBlock(onModel);
+  const core = [
+    physical,
+    buildMaterialLightingBlock(pl, is925, onModel ? "on_model" : "product_table", true),
+    buildGlobalNegativePromptBlock(prompt, {
+      onModel,
+      pendantProductNoChain: !onModel && kind === "pendant",
+    }),
+  ].join("\n\n");
+  if (onModel) {
+    return (
+      core +
+      "\n\nFINAL PRIORITY (on-model): If any line above conflicts with **visible human wearing context** (hand/finger or neck+chest+chain) while keeping the **SKU** from the init, **wearing wins** over generic tabletop / macro-packshot phrasing." +
+      "\n\n" +
+      toneLock
+    );
+  }
+  if (kind === "pendant") {
+    return (
+      core +
+      "\n\nFINAL PRIORITY (pendant product / table angles): **no visible necklace chain** — not through bail, not from frame top, not partial crop. **Bail-only** upper termination; upright bail OK; **do not** recreate chain from init/reference pixels unless the user text explicitly demands **on-body wearing** for this shot." +
+      "\n\n" +
+      toneLock
+    );
+  }
+  return core + "\n\n" + toneLock;
 }
 
 /** Step1（generate-main）："系统提示词"注入（以字符串前置方式模拟 system_prompt）。 */
@@ -625,6 +713,11 @@ export function buildNanoBananaProStep1SystemPrompt(prompt: string): string {
     "正面设计需精美复杂；背面须为可信金属封底与结构补全——可为对称深浮雕、分区肌理、品牌铭牌区或几何背纹，与正面体块重量感一致，避免无信息的大块镜面空背。",
     "吊坠背面应包含挂环与链条连接结构（仅体现连接位置/孔位，不在画面中展示链条本体），并体现焊接或铸造的工艺痕迹。",
     "主图无项链链条时：顶置 bail/挂环默认呈**竖直提拉态**（仿佛上方有链向上拉直、便于建模与穿链开孔识别），**不渲染链条**；须有可信金属连接与通透穿链孔。禁止软塌塌平趴在造型上的挂环；禁止与主体无结构连接的悬浮环。",
+    ...(kind === "pendant"
+      ? [
+          "【主图铁律 — 吊坠/项链】除非用户明确要写「佩戴图/上身/模特颈间」等，否则**绝对禁止**在画面内画出项链链条、链节、绳段从画幅上方穿入 bail；参考图含链也**不得照搬**，只取造型本体与 bail。",
+        ]
+      : []),
     "整体结构需符合佩戴功能与人体工学；与皮肤主接触带可适度平顺，但装饰背面仍可有工业级浮雕起伏，杜绝大面积虚假空心、纸片金属或半成品感。",
     "背面细节应与正面风格协调，共同构成一件完整的高端珠宝作品。",
     "",

@@ -171,7 +171,7 @@ export async function POST(req: Request) {
             "4.1) ??????????????????????????????????????2x2/????????????????????????????????????????",
           ]),
       productType === "pendant"
-        ? "5) Single pendant/necklace charm in frame: body + bail / jump ring only; NO necklace chain rendered. Bail must read upright / vertically tensioned as if pulled straight by an overhead chain (implied only, CAD-friendly stringing read); through-opening must stay visible. FORBID slack bail draped flat on the motif; FORBID drawing any chain segment."
+        ? "5) PENDANT / NECKLACE CAD HERO — ABSOLUTE: **only** pendant body + bail / jump ring in frame. **ZERO** necklace chain (no links, no segments, no cord, no string) visible anywhere — not through bail, not from top edge, not partially cropped. Bail **upright / plumb** as if an **off-camera** pull (implied only). Top of frame = **empty backdrop** above bail. Through-opening for stringing must read clearly. FORBID slack bail draped on motif; FORBID copying a reference chain even if reference shows one."
       : ["5) ??????????????????????????? / ?????????????????????????????????????????????????????????????????????????????????????????/?????", ringInnerBandStrictBlock].join(
           "\n"
         ),
@@ -217,6 +217,11 @@ export async function POST(req: Request) {
             "???????????????????????????????????/???????????????",
             "??????????????????",
             buildSingleJewelryPieceOnlyConstraintBlock(),
+            ...(kind === "pendant"
+              ? [
+                  "PENDANT (post-expand lock): **Never** add or preserve a visible necklace chain in this product hero — body + upright bail only; chain is forbidden even if AI expansion text mentions chain.",
+                ]
+              : []),
           ].join("\n\n")
         : "";
     const boostedPrompt = [basePromptWithBoosters, semanticExpansion, postAiExpandSinglePieceLock]
@@ -229,6 +234,10 @@ export async function POST(req: Request) {
         : "";
     const systemPrompt = buildNanoBananaProStep1SystemPrompt(prompt);
 
+    const pendantChainFinalLock =
+      kind === "pendant"
+        ? "\n\nPENDANT — FINAL LOCK (wins over reference + expansion): **No chain in frame.** Re-crop mentally: highest metal = bail loop; nothing linked above it. Violation = failed render."
+        : "";
     const productionSoftLimits = [
       kind === "ring"
         ? buildRingPhysicalBlock("main", false)
@@ -236,10 +245,11 @@ export async function POST(req: Request) {
       buildMaterialLightingBlock(promptLower, isSterling925),
       buildMainImageCompositionBlock(kind, prompt),
       kind === "ring" ? buildDelicateRingMotifScaleIntegrationBlock(prompt) : "",
-      buildGlobalNegativePromptBlock(prompt),
+      buildGlobalNegativePromptBlock(prompt, { pendantProductNoChain: kind === "pendant" }),
     ]
       .filter(Boolean)
-      .join("\n\n");
+      .join("\n\n")
+      .concat(pendantChainFinalLock);
 
     const batchDiversity = buildStep1BatchMotifDiversityPreamble(count, prompt);
     const userFacingExpandedPromptCommon = [
@@ -275,35 +285,51 @@ export async function POST(req: Request) {
             batchDiversity ? `\n\n${batchDiversity}` : ""
           }`;
 
-    const jobs = Array.from({ length: count }, (_, i) => i).map(async (i) => {
+    // 生图可并行；写库必须串行。Supabase pooler 常见 `connection_limit=1`，并行 persist 会触发
+    // Prisma "Timed out fetching a new connection from the connection pool".
+    const step1PromptEntries = Array.from({ length: count }, (_, i) => {
       const variantLine = buildStep1PerImageMotifVariantLine(i, count, prompt);
       const promptForThis = variantLine ? `${finalPromptCommon}\n\n${variantLine}` : finalPromptCommon;
-
-      const base64 =
-        refCount > 0
-          ? await laoZhangImagesToImage({
-              initImageDataUrls: referenceImageDataUrls,
-              prompt: promptForThis,
-              aspectRatio,
-              imageSize,
-              sampling,
-              laoZhangImageModel,
-            })
-          : await laoZhangTextToImage({
-              prompt: promptForThis,
-              aspectRatio,
-              imageSize,
-              sampling,
-              laoZhangImageModel,
-            });
-
       const userFacingExpandedPromptForThis = [
         userFacingExpandedPromptCommon,
         variantLine ? `\n????????\n${variantLine}` : "",
       ]
         .filter(Boolean)
         .join("\n");
+      return { promptForThis, userFacingExpandedPromptForThis };
+    });
 
+    const base64List = await Promise.all(
+      step1PromptEntries.map((e) =>
+        refCount > 0
+          ? laoZhangImagesToImage({
+              initImageDataUrls: referenceImageDataUrls,
+              prompt: e.promptForThis,
+              aspectRatio,
+              imageSize,
+              sampling,
+              laoZhangImageModel,
+            })
+          : laoZhangTextToImage({
+              prompt: e.promptForThis,
+              aspectRatio,
+              imageSize,
+              sampling,
+              laoZhangImageModel,
+            })
+      )
+    );
+
+    const generated: Array<{
+      id: string;
+      url: string;
+      createdAt: string;
+      debugPromptZh: string;
+    }> = [];
+    for (let i = 0; i < count; i++) {
+      const { userFacingExpandedPromptForThis } = step1PromptEntries[i]!;
+      const base64 = base64List[i];
+      if (!base64) continue;
       const persisted = await persistGeneratedImage({
         userId: authz.user.id,
         taskId,
@@ -312,16 +338,13 @@ export async function POST(req: Request) {
         debugPromptZh: userFacingExpandedPromptForThis,
         keyPrefix: `users/${authz.user.id}/step1`,
       });
-
-      return {
+      generated.push({
         id: persisted.id,
         url: persisted.url,
         createdAt: now,
-        // ?????????????????????????/????
         debugPromptZh: userFacingExpandedPromptForThis,
-      };
-    });
-    const generated = await Promise.all(jobs);
+      });
+    }
     images.push(...generated);
 
     // ?? Step1 ? systemPrompt/????????????????????? prompt????????
