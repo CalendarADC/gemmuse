@@ -27,7 +27,9 @@ import {
   buildGlobalNegativePromptBlock,
   buildSingleJewelryPieceOnlyConstraintBlock,
   inferJewelryProductKind,
+  buildStrictSceneTonePreservationBlock,
   type PromptExpansionStrength,
+  userRequestsStrictScenePreservation,
   userExplicitEnvironmentOrSurfaceInPrompt,
 } from "@/lib/ai/jewelrySoftLimits";
 import { requireApiActiveUser } from "@/lib/apiAuth";
@@ -276,9 +278,15 @@ export async function POST(req: Request) {
         ? `?????????? ${refCount} ?????????????????????????????`
         : "???????????????????",
     ].join("\n");
+    const strictSceneToneLock =
+      refCount > 0 && userRequestsStrictScenePreservation(prompt)
+        ? buildStrictSceneTonePreservationBlock()
+        : "";
     const finalPromptCommon =
       refCount > 0
-        ? `${referencePreamble}${cappyCalmLock ? `\n\n${cappyCalmLock}` : ""}\n\n${systemPrompt}\n\n${boostedPrompt}\n\n${etsyMainConstraints}\n\n${productionSoftLimits}${
+        ? `${referencePreamble}${cappyCalmLock ? `\n\n${cappyCalmLock}` : ""}${
+            strictSceneToneLock ? `\n\n${strictSceneToneLock}` : ""
+          }\n\n${systemPrompt}\n\n${boostedPrompt}\n\n${etsyMainConstraints}\n\n${productionSoftLimits}${
             batchDiversity ? `\n\n${batchDiversity}` : ""
           }`
         : `${systemPrompt}\n\n${boostedPrompt}\n\n${etsyMainConstraints}\n\n${productionSoftLimits}${

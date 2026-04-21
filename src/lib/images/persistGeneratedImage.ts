@@ -4,14 +4,24 @@ import { prisma } from "@/lib/db";
 import { uploadPngBase64ToObjectStorage } from "@/lib/storage/objectStorage";
 
 const PRISMA_POOL_TIMEOUT_HINT = "Timed out fetching a new connection from the connection pool";
-const PERSIST_CREATE_MAX_ATTEMPTS = 3;
+const PRISMA_STATEMENT_TIMEOUT_HINT = "canceling statement due to statement timeout";
+const PERSIST_CREATE_MAX_ATTEMPTS = 5;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isPrismaPoolTimeoutError(error: unknown): boolean {
-  return error instanceof Error && error.message.includes(PRISMA_POOL_TIMEOUT_HINT);
+function isTransientPrismaPersistError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const msg = error.message;
+  return (
+    msg.includes(PRISMA_POOL_TIMEOUT_HINT) ||
+    msg.includes(PRISMA_STATEMENT_TIMEOUT_HINT) ||
+    msg.includes("code: '57014'") ||
+    msg.includes("code: '40001'") || // serialization failure
+    msg.includes("code: '40P01'") || // deadlock detected
+    msg.includes("P1008") // operations timed out
+  );
 }
 
 export async function persistGeneratedImage(args: {
@@ -55,10 +65,10 @@ export async function persistGeneratedImage(args: {
         };
       } catch (error) {
         lastError = error;
-        if (!isPrismaPoolTimeoutError(error) || attempt >= PERSIST_CREATE_MAX_ATTEMPTS) {
+        if (!isTransientPrismaPersistError(error) || attempt >= PERSIST_CREATE_MAX_ATTEMPTS) {
           throw error;
         }
-        const backoffMs = 350 * attempt * attempt;
+        const backoffMs = 400 * attempt * attempt;
         await sleep(backoffMs);
       }
     }

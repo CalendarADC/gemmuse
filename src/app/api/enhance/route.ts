@@ -18,8 +18,10 @@ import {
   buildEnhanceSoftLimitSuffix,
   buildPendantRearViewDefaultSolidBackBlock,
   buildRingWomensOnModelLuxuryPresentationBlock,
+  buildStrictSceneTonePreservationBlock,
   buildSingleJewelryPieceOnlyConstraintBlock,
   inferJewelryProductKind,
+  userRequestsStrictScenePreservation,
   userSpecifiedPendantOrNecklaceRearDetail,
   userWantsWomensRingOnModelPresentation,
 } from "@/lib/ai/jewelrySoftLimits";
@@ -163,9 +165,9 @@ export async function POST(req: Request) {
 
   // Step3 ?????????????? img2img ???????????????
   // Step3 以「保持 SKU 与主图影调」为第一目标：降低随机度，减少发灰重打光与左右串位。
-  const sampling = provider === "nano-banana-pro" ? { temperature: 0.32, topP: 0.68 } : undefined;
+  const sampling = provider === "nano-banana-pro" ? { temperature: 0.22, topP: 0.6 } : undefined;
   const samplingLeftRight =
-    provider === "nano-banana-pro" ? { temperature: 0.26, topP: 0.62 } : undefined;
+    provider === "nano-banana-pro" ? { temperature: 0.18, topP: 0.55 } : undefined;
 
   if (!selectedMainImageId || !selectedMainImageUrl) {
     return NextResponse.json({ message: "?? selectedMainImage ???" }, { status: 400 });
@@ -213,6 +215,9 @@ export async function POST(req: Request) {
     const lrAbVariant = getStep3LeftRightPromptVariant();
     const lrGemToneBlock = getStep3LeftRightGemstoneColorLockBlock(lrAbVariant);
     const initToneLockInstruction = getInitToneLockInstruction(lrAbVariant);
+    const strictSceneToneLock = userRequestsStrictScenePreservation(prompt)
+      ? buildStrictSceneTonePreservationBlock()
+      : "";
 
     const baseKeepInstruction =
       "IMAGE EDIT ONLY: Preserve the init image design bit-for-bit intent ? zero redesign. Same silhouette, same motif, same stones, same metal finish **and the same overall exposure / white balance / saturation / shadow depth as the init**; only apply the requested camera orbit. **FORBID** a global gray haze, flat low-contrast relight, or desaturated \"catalog re-grade\" vs the reference.";
@@ -416,6 +421,7 @@ export async function POST(req: Request) {
         [
           `[SHOT_KIND: PRODUCT_LEFT_ORBIT — request ${runNonce}_L] Camera is on the jewelry's **physical LEFT** (counterclockwise from top). This is **NOT** a RIGHT-side shot; do **NOT** mirror a right-orbit composition.`,
           initToneLockInstruction,
+          strictSceneToneLock,
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           lrGemToneBlock,
@@ -468,6 +474,7 @@ export async function POST(req: Request) {
         [
           `[SHOT_KIND: PRODUCT_RIGHT_ORBIT — request ${runNonce}_R] Camera is on the jewelry's **physical RIGHT** (clockwise from top). This is **NOT** a LEFT-side shot; do **NOT** reuse a left-orbit composition.`,
           initToneLockInstruction,
+          strictSceneToneLock,
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           lrGemToneBlock,
@@ -525,6 +532,7 @@ export async function POST(req: Request) {
         [
           `[SHOT_KIND: PRODUCT_REAR — request ${runNonce}_B]`,
           initToneLockInstruction,
+          strictSceneToneLock,
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           pendantBailLock,
@@ -577,6 +585,7 @@ export async function POST(req: Request) {
         [
           `[SHOT_KIND: PRODUCT_FRONT_RELIGHT — request ${runNonce}_F] True frontal relight / minor camera correction only; **NOT** a duplicate casual copy of the init if the init is already frontal.`,
           initToneLockInstruction,
+          strictSceneToneLock,
           step3InputImageSovereigntyBlock(),
           baseKeepInstruction,
           pendantBailLock,

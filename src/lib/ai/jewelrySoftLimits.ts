@@ -280,6 +280,29 @@ export function userExplicitEnvironmentOrSurfaceInPrompt(prompt: string): boolea
   return false;
 }
 
+/** 用户明确要求“保持原场景/光影/色调不变”时，启用更强的影调锁。 */
+export function userRequestsStrictScenePreservation(prompt: string): boolean {
+  const p = prompt.toLowerCase();
+  return (
+    /(保持|维持|不改变|不要改变|锁定|一致|还原).{0,16}(场景|背景|光影|色调|曝光|白平衡|饱和度).{0,10}(不变|一致|原样|相同)/i.test(
+      prompt
+    ) ||
+    /(same|keep|preserve|lock).{0,20}(scene|background|lighting|tone|exposure|white\s*balance|saturation).{0,12}(unchanged|same|consistent)/i.test(
+      p
+    )
+  );
+}
+
+/** 参考图/Step3 的严格影调与场景锁，优先级高于常规风格文案。 */
+export function buildStrictSceneTonePreservationBlock(): string {
+  return [
+    "STRICT SCENE+TONE PRESERVATION (highest priority): Treat init/reference photo as photometric master.",
+    "Keep the SAME background scene identity and grade: exposure, white balance, contrast curve, saturation intent, shadow depth, highlight rolloff, and warmth.",
+    "FORBID global re-light, gray cast, desaturation, matte haze, low-contrast wash, or cool-down that makes metal/stone look darker or duller.",
+    "If any style line conflicts with this lock, this lock wins.",
+  ].join("\n");
+}
+
 /** 细戒、女性向、日常通勤等：主题不宜过大夸张，需与戒臂比例协调、自然融入 */
 export function userWantsDelicateThinWomensRing(prompt: string): boolean {
   const pl = prompt.toLowerCase();
