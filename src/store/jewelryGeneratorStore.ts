@@ -48,6 +48,7 @@ import {
   idleGeneratorStatus,
   initialSidebarTask,
   newTaskId,
+  readHttpErrorMessage,
   withStep1Generating,
   withStep3Generating,
   withStep4Generating,
@@ -1409,48 +1410,44 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             return false;
           }
 
-          // 不同主图互不依赖：并行请求 /api/enhance，总耗时常接近「最慢那一张」而非逐张相加。
-          // （单次 enhance 内多角度仍由服务端串行 img2img，见 route 注释。）
-          const perMainBatches = await Promise.all(
-            selectedItems.map(async (item) => {
-              const res = await fetch("/api/enhance", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  provider,
-                  taskId: activeTaskId,
-                  prompt,
-                  fastMode: step2FastMode,
-                  bananaImageModel: step2BananaImageModel,
-                  selectedMainImageId: item.id,
-                  selectedMainImageUrl: item.url,
-                  onModel,
-                  left,
-                  right,
-                  rear,
-                  front: !!front,
-                }),
-              });
+          // 多张主图时**顺序**请求 /api/enhance：并行会同时占满 Prisma 连接池（常见 limit=5），
+          // 易触发「Timed out fetching a new connection」并表现为 HTTP 500。
+          const merged: GalleryImage[] = [];
+          for (const item of selectedItems) {
+            const res = await fetch("/api/enhance", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                provider,
+                taskId: activeTaskId,
+                prompt,
+                fastMode: step2FastMode,
+                bananaImageModel: step2BananaImageModel,
+                selectedMainImageId: item.id,
+                selectedMainImageUrl: item.url,
+                onModel,
+                left,
+                right,
+                rear,
+                front: !!front,
+              }),
+            });
 
-              if (!res.ok) {
-                const data = (await res.json().catch(() => null)) as ApiError | null;
-                const serverMsg =
-                  typeof data?.message === "string" && data.message.trim()
-                    ? data.message.trim()
-                    : "";
-                throw new Error(serverMsg || `增强失败（HTTP ${res.status}）`);
-              }
+            if (!res.ok) {
+              const detail = await readHttpErrorMessage(res);
+              throw new Error(detail || `增强失败（HTTP ${res.status}）`);
+            }
 
-              const data = (await res.json()) as { galleryImages: GalleryImage[] };
-              const raw = data.galleryImages ?? [];
-              return raw.map((img) => ({
+            const data = (await res.json()) as { galleryImages: GalleryImage[] };
+            const raw = data.galleryImages ?? [];
+            merged.push(
+              ...raw.map((img) => ({
                 ...img,
                 setId,
                 setCreatedAt,
-              }));
-            })
-          );
-          const merged: GalleryImage[] = perMainBatches.flat();
+              }))
+            );
+          }
 
           set({
             galleryImages: merged,

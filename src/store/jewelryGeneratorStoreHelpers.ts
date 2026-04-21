@@ -1,6 +1,20 @@
 import type { Copywriting, GalleryImageSelector, GeneratorStatus, GeneratorTask } from "./jewelryGeneratorTypes";
 
 /** 将浏览器/Node 的 fetch 连接失败转为可读中文提示 */
+/** 从非 2xx 的 fetch 响应中解析 `message` 或原始片段，便于在 UI 展示真实原因。 */
+export async function readHttpErrorMessage(res: Response): Promise<string> {
+  const raw = await res.text().catch(() => "");
+  const t = raw.trim();
+  if (!t) return "";
+  try {
+    const j = JSON.parse(t) as { message?: unknown };
+    if (typeof j.message === "string" && j.message.trim()) return j.message.trim();
+  } catch {
+    /* 非 JSON */
+  }
+  return t.length > 500 ? `${t.slice(0, 500)}…` : t;
+}
+
 export function friendlyFetchErrorMessage(e: unknown): string | undefined {
   if (!(e instanceof Error)) return undefined;
   const msg = e.message;
