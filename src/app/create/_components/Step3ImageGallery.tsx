@@ -307,7 +307,7 @@ export default function Step3ImageGallery() {
     if (typeof window === "undefined" || typeof Worker === "undefined") return;
     try {
       const worker = new Worker(
-        new URL("../../workers/thumbDataUrl.worker.ts", import.meta.url),
+        new URL("../../../workers/thumbDataUrl.worker.ts", import.meta.url),
         { type: "module" }
       );
       thumbWorkerRef.current = worker;
@@ -1859,4 +1859,3 @@ export default function Step3ImageGallery() {
     </div>
   );
 }
-

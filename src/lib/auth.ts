@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { authOptions } from "@/lib/authOptions";
 import { prisma } from "@/lib/db";
+import { isDesktopLocalServerMode } from "@/lib/runtime/desktopLocalMode";
 
 export async function getAuthSession() {
   return getServerSession(authOptions);
@@ -20,6 +21,16 @@ function isPrismaPoolBusyError(error: unknown): boolean {
 }
 
 export async function requireActiveUser() {
+  if (isDesktopLocalServerMode()) {
+    return {
+      id: "desktop-local-user",
+      email: null,
+      name: "Desktop Local User",
+      role: "ADMIN" as const,
+      status: "ACTIVE" as const,
+    };
+  }
+
   const session = await getAuthSession();
   if (!session?.user?.id) redirect("/login");
 

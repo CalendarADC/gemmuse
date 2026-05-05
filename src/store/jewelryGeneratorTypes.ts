@@ -1,9 +1,9 @@
 export type AIProvider = "nano-banana-pro" | "chatgpt-1.5";
 export type Step1ExpansionStrength = "standard" | "strong";
-/** Step1/2：老张 Banana pro（Pro）与 Banana 2（Flash） */
-export type StepBananaImageModel = "banana-pro" | "banana-2";
+/** Step1/2：老张 Banana pro（Pro）/ Banana 2（Flash）/ GPT Image 2 */
+export type StepBananaImageModel = "banana-pro" | "banana-2" | "gpt-image-2";
 /** @deprecated 仅旧 IDB meta 迁移 */
-export type Step1ImageModel = "banana-pro" | "banana-2";
+export type Step1ImageModel = "banana-pro" | "banana-2" | "gpt-image-2";
 
 export type MainImage = {
   id: string;
@@ -102,6 +102,7 @@ export type JewelryGeneratorStore = {
   step1ExpansionStrength: Step1ExpansionStrength;
   step1FastMode: boolean;
   step2FastMode: boolean;
+  laozhangApiKey: string;
   /** Step1 可选参考图（data URL），最多 3 张；不写入 persist */
   step1ReferenceImageDataUrls: string[];
 
@@ -139,6 +140,7 @@ export type JewelryGeneratorStore = {
   setStep1ExpansionStrength: (v: Step1ExpansionStrength) => void;
   setStep1FastMode: (v: boolean) => void;
   setStep2FastMode: (v: boolean) => void;
+  setLaozhangApiKey: (v: string) => void;
   addStep1ReferenceImage: (dataUrl: string) => boolean;
   removeStep1ReferenceImageAt: (index: number) => void;
   clearStep1ReferenceImages: () => void;

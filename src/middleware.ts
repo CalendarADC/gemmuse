@@ -1,40 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getToken } from "next-auth/jwt";
-
-import { isProtectedPath, isPublicPath } from "@/lib/auth/middlewarePaths";
-import { getAuthSecret } from "@/lib/authSecret";
+import { isDesktopLocalServerMode } from "@/lib/runtime/desktopLocalMode";
 
 export async function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
-
-  if (!isProtectedPath(pathname) && !isPublicPath(pathname)) {
+  if (isDesktopLocalServerMode(req)) {
     return NextResponse.next();
   }
-
-  const token = await getToken({ req, secret: getAuthSecret() });
-  const isLoggedIn = !!token?.sub;
-  const status = (token?.status as string | undefined) ?? "";
-  const role = (token?.role as string | undefined) ?? "";
-
-  if (!isLoggedIn && isProtectedPath(pathname)) {
-    const url = new URL("/login", req.url);
-    url.searchParams.set("next", pathname);
-    return NextResponse.redirect(url);
-  }
-
-  if (isLoggedIn && (pathname === "/" || pathname === "/login" || pathname === "/register")) {
-    if (status === "PENDING") return NextResponse.redirect(new URL("/pending", req.url));
-    if (status === "ACTIVE") return NextResponse.redirect(new URL("/create/design", req.url));
-  }
-
-  if (isLoggedIn && status === "PENDING" && pathname.startsWith("/create")) {
-    return NextResponse.redirect(new URL("/pending", req.url));
-  }
-
-  if (pathname.startsWith("/admin") && role !== "ADMIN") {
-    return NextResponse.redirect(new URL("/create/design", req.url));
-  }
-
   return NextResponse.next();
 }
 

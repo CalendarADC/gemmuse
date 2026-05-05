@@ -12,7 +12,7 @@ const MAX_IDS = 48;
  * 否则仅删本地时刷新会由 GET workspace 再次合并回来。
  */
 export async function DELETE(req: Request, ctx: { params: Promise<{ taskId: string }> }) {
-  const authz = await requireApiActiveUser();
+  const authz = await requireApiActiveUser(req);
   if (!authz.ok) return authz.response;
 
   const { taskId } = await ctx.params;

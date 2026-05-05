@@ -5,7 +5,7 @@ import { requireApiActiveUser } from "@/lib/apiAuth";
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const authz = await requireApiActiveUser();
+  const authz = await requireApiActiveUser(req);
   if (!authz.ok) return authz.response;
 
   const reqUrl = new URL(req.url);

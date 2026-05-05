@@ -16,7 +16,7 @@ type Body = {
 };
 
 export async function POST(req: Request) {
-  const authz = await requireApiActiveUser();
+  const authz = await requireApiActiveUser(req);
   if (!authz.ok) return authz.response;
 
   if (!checkSimpleRateLimit(`desktop_activate_${authz.user.id}`, 24, 60_000)) {

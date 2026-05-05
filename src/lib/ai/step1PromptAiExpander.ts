@@ -91,28 +91,32 @@ export async function expandStep1PromptWithAi(args: ExpandArgs): Promise<ExpandR
   const model = process.env.STEP1_EXPAND_MODEL || "gpt-5.4";
 
   const system = [
-    "You are a senior jewelry concept prompt expander.",
-    "Task: rewrite the user's prompt into one polished, production-oriented English prompt for image generation.",
-    "Keep the original subject and intent unchanged. Do NOT change category.",
-    "Enhance with jewelry-native language: materials, craftsmanship, manufacturability cues, setting logic, silhouette flow, and premium e-commerce render clarity.",
+    "You are a senior jewelry concept prompt expander for Chinese-speaking users.",
+    "",
+    "LANGUAGE (HARD): The entire expanded output MUST be written in Simplified Chinese (简体中文).",
+    "Do not write the expanded prompt primarily in English. You may keep short unavoidable tokens (e.g. 925, AU750, 4K, brand codes) inline where natural.",
+    "",
+    "Task: 将用户输入改写为一段可直接用于 AI 生图的、精炼的简体中文提示词（电商主图级清晰度）。",
+    "保持用户原始主题与意图不变；不要擅自更换品类（戒指/吊坠等以用户与品类推断为准）。",
+    "补充珠宝专业表达：材质、工艺、可生产性、镶嵌逻辑、轮廓与光影，但避免空洞堆砌。",
     "",
     "HARD OUTPUT RULE — SINGLE HERO PRODUCT ONLY:",
-    "The expanded text must describe exactly ONE physical jewelry piece for ONE e-commerce hero photograph.",
-    "NEVER describe or imply multiple rings/pendants in the same frame: no trio/row/lineup, no 'three rings on leather', no side-by-side variants, no collection spread, no comparison set, no 'each ring shows a different animal' in one shot.",
-    "If the user lists several animals or motifs (slashes, commas, 'or', Chinese enumeration): interpret them as design inspiration for ONE unified piece OR pick ONE primary motif for this single render — do NOT instruct a multi-ring composition.",
-    "WEARABILITY HARD RULE (ring): do NOT introduce downward protrusions under the ring underside / finger-contact zone (no bottom spikes, claws, hooks, hanging points, or obstructive ornaments that poke the hand). Keep underside smooth and wearable.",
-    "Return only the final expanded English prompt as plain text (no JSON, no markdown, no explanations).",
+    "扩写正文必须只描述「一件」实体珠宝、「一张」主图画面；禁止一图多件、排戒展示、对比组图、系列陈列等。",
+    "若用户列举多种动物或元素：视为同一枚首饰的设计灵感来源，或择一主元素统一呈现，不得要求画面出现多枚戒指/多件主体。",
+    "戒指可佩戴性：戒圈与手指接触区域下方禁止向下凸出的尖刺、爪钩、悬挂结构等硌手造型，内侧尽量平顺可戴。",
+    "",
+    "OUTPUT FORMAT: 只输出最终扩写后的中文提示词纯文本；禁止 JSON、Markdown、解释性前后缀。",
   ].join("\n");
 
   const user = [
-    `Category: ${args.kind}`,
-    "User prompt:",
+    `品类（推断）: ${args.kind}`,
+    "用户原始提示:",
     args.prompt.trim(),
   ].join("\n");
 
   const payload = {
     model,
-    temperature: 0.7,
+    temperature: 0.85,
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
@@ -170,4 +174,3 @@ export async function expandStep1PromptWithAi(args: ExpandArgs): Promise<ExpandR
 
   throw new Error("Step1 AI 改写失败：重试次数已用尽。");
 }
-

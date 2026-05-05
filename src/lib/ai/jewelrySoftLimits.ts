@@ -5,6 +5,23 @@
 
 export type JewelryProductKind = "ring" | "pendant";
 export type PromptExpansionStrength = "standard" | "strong";
+export type PendantRearTopologyClass = "relief_3d" | "plate_back";
+
+export function classifyPendantRearTopologyFromPrompt(prompt: string): PendantRearTopologyClass {
+  const t = prompt.trim().toLowerCase();
+  if (!t) return "relief_3d";
+  const plateLike =
+    /(圆盘|方盘|徽章|章牌|奖章|coin|medallion|disk|disc|badge|seal|flat\s*back|平面封底|封底|平背|平板|牌状|盘状)/i.test(
+      t
+    );
+  if (plateLike) return "plate_back";
+  const reliefLike =
+    /(立体|浮雕|厚雕|厚重|3d|three[-\s]?dimensional|volumetric|sculpt|round[-\s]?body|full[-\s]?body|背面立体|双面凸)/i.test(
+      t
+    );
+  if (reliefLike) return "relief_3d";
+  return "relief_3d";
+}
 
 /**
  * 与 generate-main / Step3 enhance 一致：
@@ -70,6 +87,53 @@ export function buildPendantRearViewDefaultSolidBackBlock(): string {
     "WEARABILITY: avoid toy-like **random sieve perforations** across the whole rear that would break skin contact; pierced/openwork rear ONLY if the user prompt clearly requests it.",
     "BAIL / HARDWARE on rear: show believable **solid posts, junctions, and inner loop paths** — never delete or seal shut the functional bail.",
     "QUALITY BAR: match **high-end CAD reverse completion** (comparable to pro 3D jewelry tools auto-completing a back view) — the reverse must feel **authored and manufacturable**, not a rushed flat fill.",
+  ].join("\n");
+}
+
+/**
+ * Step3 吊坠后视两阶段：第一阶段侧视探针。
+ * 目标是先暴露厚度与背板轮廓，避免直接 rear 时模型“偷懒回正面”。
+ */
+export function buildPendantRearTopologyProbeBlock(): string {
+  return [
+    "PENDANT PROFILE PROBE (classification pre-pass, not final deliverable): generate a strict side/profile capture to expose depth and back-plane cues.",
+    "Camera instruction: 85°-95° lateral orbit from hero front; keep motif visible as edge/profile; reveal front relief thickness, back-plane boundary, and rim depth in one frame.",
+    "FORBID frontal fallback: no straight-on face, no near-frontal beauty relight, no duplicate hero crop.",
+    "REQUIRE geometry cues: at least two of {clear front relief projection, visible rear boundary plane, measurable rim thickness, bail-junction depth read}.",
+    "Keep same SKU and same scene family; this probe is only for topology disambiguation.",
+  ].join("\n");
+}
+
+/**
+ * Step3 吊坠后视两阶段：第二阶段按拓扑生成后视主约束块。
+ */
+export function buildPendantRearByTopologyBlock(topology: PendantRearTopologyClass): string {
+  if (topology === "plate_back") {
+    return [
+      "PENDANT REAR TOPOLOGY = PLATE_BACK (strict): treat this SKU as medallion/plate family — rear should be near-planar sealed back, not a full convex second sculpture.",
+      "REAR TARGET: mostly flat or gently stepped back plane with manufacturable details (engraving, ribs, webs, floral/filigree, hallmarks, gem-seat backs where applicable).",
+      "Thickness rule: preserve realistic rim/wall thickness from profile cues; do not collapse to paper-thin sheet.",
+      "FORBID: front-face duplicate from rear request, full animal face/front motif on rear, or deep convex back that reads like another front sculpture.",
+      "ANTI-DUPLICATE: rear must be structurally distinguishable from front/main beyond lighting changes.",
+    ].join("\n");
+  }
+  return [
+    "PENDANT REAR TOPOLOGY = RELIEF_3D (strict): treat this SKU as volumetric relief family — rear must continue solid 3D mass and back-of-relief geometry.",
+    "REAR TARGET: readable rear volume, back-side curvature/stepped depths, believable structural continuation from front relief and side thickness.",
+    "FORBID: flat sealed slab rear with no volumetric continuity when profile indicates thick relief body.",
+    "ANTI-DUPLICATE: rear must not be a near-frontal clone; camera must favor normals opposite to hero front.",
+  ].join("\n");
+}
+
+/**
+ * 两阶段 rear：从 profile probe 继续转到背面，显式禁止回到 front-like。
+ */
+export function buildPendantRearFromProbeContinuationBlock(): string {
+  return [
+    "REAR FROM PROFILE CONTINUATION (strict): the current generation is stage-2 and MUST continue camera orbit from the profile probe toward back view.",
+    "Orbit requirement: continue another ~70°-110° from probe bearing so the final camera normals point away from hero front.",
+    "FORBID fallback: do NOT reset to frontal hero composition, do NOT output front-face duplicate with only relight changes.",
+    "Success criteria: rear structural cues must dominate (back plane / rear relief / back-side hardware continuity), while SKU identity stays locked.",
   ].join("\n");
 }
 

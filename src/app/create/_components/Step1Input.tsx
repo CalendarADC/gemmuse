@@ -9,6 +9,8 @@ import { consumeGalleryDragPayload, GALLERY_DRAG_REF_MIME } from "@/lib/ui/galle
 import { STEP1_CIRCLE_BTN_BASE, step1CircleBtnClass } from "./createToolbarCircleButton";
 import ResolutionToggleIcon from "./ResolutionToggleIcon";
 import { detectCappyCalmMaterialPreset } from "@/lib/ip/cappyCalm";
+import { emitToast } from "@/lib/ui/toast";
+import { withDesktopLocalHeader } from "@/lib/runtime/desktopLocalMode";
 
 const MAX_REFERENCE_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_REFERENCE_IMAGE_PAYLOAD_BYTES = 900 * 1024;
@@ -21,6 +23,9 @@ const STEP1_PROMPT_HINT = "输入您的灵感火花，我们帮您实现";
 const STEP1_PROMPT_TEXTAREA_MIN_PX = 40;
 const STEP1_PROMPT_TEXTAREA_MAX_PX = 320;
 
+/** AI 扩写进行中：琥珀高亮 + 脉冲，与生成按钮禁用态呼应 */
+const STEP1_EXPAND_BULB_CLASS = `${STEP1_CIRCLE_BTN_BASE} pointer-events-none border-amber-400 bg-amber-50 text-amber-900 shadow-[0_0_18px_rgba(245,158,11,0.5)] ring-2 ring-amber-300/80 ring-offset-1 ring-offset-[var(--create-surface-paper)] animate-[pulse_0.85s_ease-in-out_infinite]`;
+
 type Step1ToolbarMenu = "model" | "count";
 
 const STEP1_MENU_PANEL =
@@ -30,7 +35,7 @@ const STEP1_MENU_PANEL =
 const STEP1_MODEL_MENU_PANEL =
   "absolute left-0 top-full z-[35] mt-1.5 min-w-max max-w-[min(100vw-2rem,280px)] overflow-hidden rounded-xl border border-[rgba(94,111,130,0.18)] bg-[var(--create-surface-paper)] py-1 shadow-lg";
 
-/** 生图模型按钮：原「大脑」参考图，置于 public/icons/step1-brain.png */
+/** 生图模型按钮：`public/icons/step1-brain.png` */
 function IconStep1Brain({ className }: { className?: string }) {
   return (
     <img
@@ -46,7 +51,7 @@ function IconStep1Brain({ className }: { className?: string }) {
   );
 }
 
-/** 创意模式按钮：灯泡 + 齿轮（用户 PNG） */
+/** 创意模式：`public/icons/step1-creative-lightbulb.png` */
 function IconStep1CreativeLightbulb({ className }: { className?: string }) {
   return (
     <img
@@ -62,7 +67,7 @@ function IconStep1CreativeLightbulb({ className }: { className?: string }) {
   );
 }
 
-/** 清空参考图：红色垃圾桶，置于 public/icons/step1-clear-reference.png */
+/** 清空参考图：`public/icons/step1-clear-reference.png` */
 function IconStep1ClearReference({ className }: { className?: string }) {
   return (
     <img
@@ -213,11 +218,20 @@ export default function Step1Input() {
   const fileInputId = useId();
   const [uploadHint, setUploadHint] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [promptInputFocused, setPromptInputFocused] = useState(false);
+  /** 中文等 IME 组字期间 prompt 可能仍为空，需与占位层解耦 */
+  const [promptComposing, setPromptComposing] = useState(false);
   const [toolbarMenuOpen, setToolbarMenuOpen] = useState<Step1ToolbarMenu | null>(null);
   const step1ToolbarRef = useRef<HTMLDivElement>(null);
   const step1StartedAt = status.step1GenerationStartedAt;
   const [step1TimerTick, setStep1TimerTick] = useState(0);
+  const [isExpandingPrompt, setIsExpandingPrompt] = useState(false);
+
+  useEffect(() => {
+    // 灯泡改为「即时扩写」后，避免遗留 strong 状态导致生成时重复扩写。
+    if (step1ExpansionStrength !== "standard") {
+      setStep1ExpansionStrength("standard");
+    }
+  }, [setStep1ExpansionStrength, step1ExpansionStrength]);
 
   const syncPromptTextareaHeight = useCallback(() => {
     const ta = promptInputRef.current;
@@ -229,6 +243,50 @@ export default function Step1Input() {
     ta.style.height = `${next}px`;
     ta.style.overflowY = sh > max ? "auto" : "hidden";
   }, []);
+
+  const handleInstantAiExpand = useCallback(async () => {
+    if (isGenerating || isExpandingPrompt) return;
+    const rawPrompt = prompt.trim();
+    if (!rawPrompt) {
+      emitToast({ type: "error", message: "请先输入几个想法关键词，再点灯泡扩写。" });
+      promptInputRef.current?.focus();
+      return;
+    }
+    setIsExpandingPrompt(true);
+    try {
+      const res = await fetch("/api/step1-expand", {
+        method: "POST",
+        credentials: "include",
+        headers: withDesktopLocalHeader({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ prompt: rawPrompt }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(data?.message || `AI 扩写失败（HTTP ${res.status}）`);
+      }
+      const data = (await res.json()) as { expandedPrompt?: string };
+      const expandedPrompt = (data.expandedPrompt ?? "").trim();
+      if (!expandedPrompt) {
+        throw new Error("AI 扩写失败：返回为空。");
+      }
+      setPrompt(expandedPrompt);
+      setStep1ExpansionStrength("standard");
+      requestAnimationFrame(() => syncPromptTextareaHeight());
+      emitToast({ type: "success", message: "AI 扩写已生成，可直接点击生成。" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "AI 扩写失败，请稍后重试。";
+      emitToast({ type: "error", message });
+    } finally {
+      setIsExpandingPrompt(false);
+    }
+  }, [
+    isGenerating,
+    isExpandingPrompt,
+    prompt,
+    setPrompt,
+    setStep1ExpansionStrength,
+    syncPromptTextareaHeight,
+  ]);
 
   useLayoutEffect(() => {
     syncPromptTextareaHeight();
@@ -534,10 +592,10 @@ export default function Step1Input() {
               : ""
         }`}
       >
-        <div className="relative">
-          {!prompt.trim() && !promptInputFocused ? (
+        <div className="group/step1 relative">
+          {!prompt.trim() && !promptComposing ? (
             <div
-              className="pointer-events-none absolute inset-0 z-[1] p-2"
+              className="pointer-events-none absolute inset-0 z-[1] p-2 group-focus-within/step1:hidden"
               aria-hidden
             >
               <span className="step1-prompt-hint-line text-sm leading-relaxed text-gray-400">
@@ -553,8 +611,11 @@ export default function Step1Input() {
             placeholder={STEP1_PROMPT_HINT}
             aria-label={STEP1_PROMPT_HINT}
             onChange={(e) => setPrompt(e.target.value)}
-            onFocus={() => setPromptInputFocused(true)}
-            onBlur={() => setPromptInputFocused(false)}
+            onCompositionStart={() => setPromptComposing(true)}
+            onCompositionEnd={(e) => {
+              setPromptComposing(false);
+              setPrompt(e.currentTarget.value);
+            }}
           />
         </div>
 
@@ -631,11 +692,13 @@ export default function Step1Input() {
                 aria-haspopup="listbox"
                 aria-expanded={toolbarMenuOpen === "model"}
                 aria-pressed={step1BananaImageModel === "banana-pro"}
-                aria-label="生图模型：Banana pro 或 Banana 2（老张）"
+                aria-label="生图模型：Banana pro、Banana 2 或 gpt-image-2（老张）"
                 title={
                   step1BananaImageModel === "banana-2"
                     ? "当前 Banana 2，点击更换"
-                    : "当前 Banana pro，点击更换"
+                    : step1BananaImageModel === "gpt-image-2"
+                      ? "当前 gpt-image-2，点击更换"
+                      : "当前 Banana pro，点击更换"
                 }
                 className={step1CircleBtnClass(step1BananaImageModel === "banana-pro", isGenerating)}
                 onClick={(e) => {
@@ -672,13 +735,33 @@ export default function Step1Input() {
                     type="button"
                     role="option"
                     aria-selected={step1BananaImageModel === "banana-2"}
-                    className="block w-full whitespace-nowrap px-3 py-2 text-left text-sm text-[#363028] transition hover:bg-[color-mix(in_srgb,var(--create-surface-tray)_12%,var(--create-surface-paper))]"
+                    className={`block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition ${
+                      step1BananaImageModel === "banana-2"
+                        ? "bg-amber-50 font-semibold text-amber-900"
+                        : "text-[#363028] hover:bg-[color-mix(in_srgb,var(--create-surface-tray)_12%,var(--create-surface-paper))]"
+                    }`}
                     onClick={() => {
                       setStep1BananaImageModel("banana-2");
                       setToolbarMenuOpen(null);
                     }}
                   >
                     Banana 2
+                  </button>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={step1BananaImageModel === "gpt-image-2"}
+                    className={`block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition ${
+                      step1BananaImageModel === "gpt-image-2"
+                        ? "bg-amber-50 font-semibold text-amber-900"
+                        : "text-[#363028] hover:bg-[color-mix(in_srgb,var(--create-surface-tray)_12%,var(--create-surface-paper))]"
+                    }`}
+                    onClick={() => {
+                      setStep1BananaImageModel("gpt-image-2");
+                      setToolbarMenuOpen(null);
+                    }}
+                  >
+                    gpt-image-2
                   </button>
                 </div>
               ) : null}
@@ -733,27 +816,6 @@ export default function Step1Input() {
             <button
               type="button"
               disabled={isGenerating}
-              aria-pressed={step1ExpansionStrength === "strong"}
-              aria-label={step1ExpansionStrength === "strong" ? "AI强创意" : "标准创意"}
-              title={
-                step1ExpansionStrength === "strong"
-                  ? "AI强创意，点击切换为标准创意"
-                  : "标准创意，点击切换为 AI强创意"
-              }
-              className={step1CircleBtnClass(step1ExpansionStrength === "strong", isGenerating)}
-              onClick={(e) => {
-                e.stopPropagation();
-                setStep1ExpansionStrength(
-                  step1ExpansionStrength === "strong" ? "standard" : "strong"
-                );
-              }}
-            >
-              <IconStep1CreativeLightbulb className="shrink-0" />
-            </button>
-
-            <button
-              type="button"
-              disabled={isGenerating}
               aria-pressed={!step1FastMode}
               aria-label={step1FastMode ? "极速模式（2K）" : "高清模式（4K）"}
               title={
@@ -788,8 +850,32 @@ export default function Step1Input() {
             ) : null}
           </div>
 
-          <div className="ml-auto flex shrink-0 items-start">
-            <Step1GenerateButton />
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              disabled={isGenerating}
+              aria-busy={isExpandingPrompt}
+              aria-disabled={isExpandingPrompt}
+              aria-label="AI 扩写提示词"
+              title={isExpandingPrompt ? "AI 扩写中…" : "点击立即 AI 扩写提示词"}
+              className={
+                isGenerating
+                  ? step1CircleBtnClass(false, true)
+                  : isExpandingPrompt
+                    ? STEP1_EXPAND_BULB_CLASS
+                    : step1CircleBtnClass(false, false)
+              }
+              onKeyDown={(e) => {
+                if (isExpandingPrompt && (e.key === " " || e.key === "Enter")) e.preventDefault();
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleInstantAiExpand();
+              }}
+            >
+              <IconStep1CreativeLightbulb className="shrink-0" />
+            </button>
+            <Step1GenerateButton expandBusy={isExpandingPrompt} />
           </div>
         </div>
 
@@ -805,4 +891,3 @@ export default function Step1Input() {
     </div>
   );
 }
-

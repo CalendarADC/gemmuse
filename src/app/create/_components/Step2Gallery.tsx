@@ -18,7 +18,7 @@ import { IconStep2Favorites, IconStep2History, IconStep2SelectAll } from "./step
 const STEP2_MODEL_MENU_PANEL =
   "absolute left-0 top-full z-[35] mt-1.5 min-w-max max-w-[min(100vw-2rem,280px)] overflow-hidden rounded-xl border border-[rgba(94,111,130,0.18)] bg-[var(--create-surface-paper)] py-1 shadow-lg";
 
-/** 与 Step1 相同资源：public/icons/step1-brain.png */
+/** 与 Step1 相同：`public/icons/step1-brain.png` */
 function IconStep1Brain({ className }: { className?: string }) {
   return (
     <img
@@ -581,11 +581,13 @@ export default function Step2Gallery() {
                 aria-haspopup="listbox"
                 aria-expanded={step2ModelMenuOpen}
                 aria-pressed={step2BananaImageModel === "banana-pro"}
-                aria-label="Step2 生图模型：Banana pro 或 Banana 2（老张）"
+                aria-label="Step2 生图模型：Banana pro、Banana 2 或 gpt-image-2（老张）"
                 title={
                   step2BananaImageModel === "banana-2"
                     ? "当前 Banana 2，点击更换"
-                    : "当前 Banana pro，点击更换"
+                    : step2BananaImageModel === "gpt-image-2"
+                      ? "当前 gpt-image-2，点击更换"
+                      : "当前 Banana pro，点击更换"
                 }
                 className={step1CircleBtnClass(step2BananaImageModel === "banana-pro", step2ToolbarBusy)}
                 onClick={(e) => {
@@ -622,13 +624,33 @@ export default function Step2Gallery() {
                     type="button"
                     role="option"
                     aria-selected={step2BananaImageModel === "banana-2"}
-                    className="block w-full whitespace-nowrap px-3 py-2 text-left text-sm text-[#363028] transition hover:bg-[color-mix(in_srgb,var(--create-surface-tray)_12%,var(--create-surface-paper))]"
+                    className={`block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition ${
+                      step2BananaImageModel === "banana-2"
+                        ? "bg-amber-50 font-semibold text-amber-900"
+                        : "text-[#363028] hover:bg-[color-mix(in_srgb,var(--create-surface-tray)_12%,var(--create-surface-paper))]"
+                    }`}
                     onClick={() => {
                       setStep2BananaImageModel("banana-2");
                       setStep2ModelMenuOpen(false);
                     }}
                   >
                     Banana 2
+                  </button>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={step2BananaImageModel === "gpt-image-2"}
+                    className={`block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition ${
+                      step2BananaImageModel === "gpt-image-2"
+                        ? "bg-amber-50 font-semibold text-amber-900"
+                        : "text-[#363028] hover:bg-[color-mix(in_srgb,var(--create-surface-tray)_12%,var(--create-surface-paper))]"
+                    }`}
+                    onClick={() => {
+                      setStep2BananaImageModel("gpt-image-2");
+                      setStep2ModelMenuOpen(false);
+                    }}
+                  >
+                    gpt-image-2
                   </button>
                 </div>
               ) : null}
@@ -778,4 +800,3 @@ export default function Step2Gallery() {
     </div>
   );
 }
-

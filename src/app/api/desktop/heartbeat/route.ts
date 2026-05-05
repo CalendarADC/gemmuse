@@ -12,7 +12,7 @@ import {
 export const runtime = "nodejs";
 
 export async function POST(req: Request) {
-  const authz = await requireApiActiveUser();
+  const authz = await requireApiActiveUser(req);
   if (!authz.ok) return authz.response;
 
   if (!checkSimpleRateLimit(`desktop_heartbeat_${authz.user.id}`, 120, 60_000)) {

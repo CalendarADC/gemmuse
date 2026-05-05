@@ -1,4 +1,4 @@
-/** Step2/Step3 共用：收藏星、历史叠图、全选（资源在 public/icons/step2-*.png） */
+/** Step2/Step3 共用：`public/icons/step2-*.png` */
 
 export function IconStep2Favorites({ className }: { className?: string }) {
   return (

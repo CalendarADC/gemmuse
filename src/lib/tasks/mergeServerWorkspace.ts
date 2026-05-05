@@ -1,4 +1,8 @@
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import {
+  isStrictLocalClientMode,
+  withDesktopLocalHeader,
+} from "@/lib/runtime/desktopLocalMode";
 import type { Copywriting, GalleryImage, GalleryImageType, MainImage } from "@/store/jewelryGeneratorTypes";
 
 import type { TaskIdbPayload, TaskWorkspaceMeta } from "@/lib/tasks/taskPersistence";
@@ -22,6 +26,10 @@ export type ServerWorkspaceJson = {
     lastImageCountPassed: number | null;
   } | null;
 };
+
+const WORKSPACE_FETCH_MIN_INTERVAL_MS = 20_000;
+const workspaceLastFetchAt = new Map<string, number>();
+const workspaceInFlight = new Map<string, Promise<ServerWorkspaceJson | null>>();
 
 function parseTime(iso?: string): number {
   if (!iso) return 0;
@@ -290,15 +298,29 @@ export function mergeTaskWorkspaceWithServer(
 }
 
 export async function fetchTaskWorkspaceFromServer(taskId: string): Promise<ServerWorkspaceJson | null> {
-  try {
-    const res = await fetchWithRetry(
-      `/api/tasks/${encodeURIComponent(taskId)}/workspace`,
-      { method: "GET" },
-      { retries: 2, baseDelayMs: 400, timeoutMs: 12_000 }
-    );
-    if (!res.ok) return null;
-    return (await res.json()) as ServerWorkspaceJson;
-  } catch {
-    return null;
-  }
+  if (isStrictLocalClientMode()) return null;
+  const now = Date.now();
+  const last = workspaceLastFetchAt.get(taskId) ?? 0;
+  if (now - last < WORKSPACE_FETCH_MIN_INTERVAL_MS) return null;
+  const running = workspaceInFlight.get(taskId);
+  if (running) return running;
+
+  workspaceLastFetchAt.set(taskId, now);
+  const run = (async () => {
+    try {
+      const res = await fetchWithRetry(
+        `/api/tasks/${encodeURIComponent(taskId)}/workspace`,
+        { method: "GET", headers: withDesktopLocalHeader() },
+        { retries: 2, baseDelayMs: 400, timeoutMs: 12_000 }
+      );
+      if (!res.ok) return null;
+      return (await res.json()) as ServerWorkspaceJson;
+    } catch {
+      return null;
+    } finally {
+      workspaceInFlight.delete(taskId);
+    }
+  })();
+  workspaceInFlight.set(taskId, run);
+  return run;
 }

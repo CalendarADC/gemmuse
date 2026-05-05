@@ -1,4 +1,8 @@
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import {
+  isStrictLocalClientMode,
+  withDesktopLocalHeader,
+} from "@/lib/runtime/desktopLocalMode";
 
 import type { GeneratorTask } from "@/store/jewelryGeneratorTypes";
 
@@ -14,9 +18,10 @@ type ServerTask = {
 };
 
 export async function fetchServerTasks(): Promise<GeneratorTask[]> {
+  if (isStrictLocalClientMode()) return [];
   const res = await fetchWithRetry(
     "/api/tasks",
-    { method: "GET" },
+    { method: "GET", headers: withDesktopLocalHeader() },
     { retries: 2, baseDelayMs: 400, timeoutMs: 12_000 }
   );
   if (!res.ok) throw new Error(`任务同步失败（HTTP ${res.status}）`);

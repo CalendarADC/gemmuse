@@ -26,6 +26,7 @@ import {
   userWantsWomensRingOnModelPresentation,
 } from "@/lib/ai/jewelrySoftLimits";
 import { requireApiActiveUser } from "@/lib/apiAuth";
+import { isDesktopBundledClientRequest } from "@/lib/runtime/desktopLocalMode";
 import { persistGeneratedImage } from "@/lib/images/persistGeneratedImage";
 import { ensureOwnedTaskId } from "@/lib/tasks/resolveTask";
 
@@ -139,8 +140,11 @@ function makeGalleryImage({
 }
 
 export async function POST(req: Request) {
-  const authz = await requireApiActiveUser();
+  const authz = await requireApiActiveUser(req);
   if (!authz.ok) return authz.response;
+
+  const desktopUpsert =
+    authz.authSource === "desktop-runtime" && isDesktopBundledClientRequest(req);
 
   try {
   const body = (await req.json().catch(() => ({}))) as Partial<Body>;
@@ -174,7 +178,8 @@ export async function POST(req: Request) {
   }
   /** ??/???? taskId ????????????????????? */
   const taskIdForPersist =
-    (await ensureOwnedTaskId(authz.user.id, taskIdRaw)) ?? undefined;
+    (await ensureOwnedTaskId(authz.user.id, taskIdRaw, { upsertForDesktop: desktopUpsert })) ??
+    undefined;
 
   /** Node ? fetch ???? URL?????????????? */
   const resolvedMainImageUrl =

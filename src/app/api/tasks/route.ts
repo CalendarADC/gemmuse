@@ -13,8 +13,8 @@ function toStep(v: unknown): TaskStepWire | null {
   return v === "STEP1" || v === "STEP2" || v === "STEP3" || v === "STEP4" ? v : null;
 }
 
-export async function GET() {
-  const authz = await requireApiActiveUser();
+export async function GET(req: Request) {
+  const authz = await requireApiActiveUser(req);
   if (!authz.ok) return authz.response;
 
   let tasks = await prisma.task.findMany({
@@ -54,7 +54,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const authz = await requireApiActiveUser();
+  const authz = await requireApiActiveUser(req);
   if (!authz.ok) return authz.response;
   const body = (await req.json().catch(() => ({}))) as { name?: string };
   const name = String(body.name ?? "").trim().slice(0, 80) || "新任务";
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  const authz = await requireApiActiveUser();
+  const authz = await requireApiActiveUser(req);
   if (!authz.ok) return authz.response;
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -117,7 +117,7 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const authz = await requireApiActiveUser();
+  const authz = await requireApiActiveUser(req);
   if (!authz.ok) return authz.response;
   const taskId = new URL(req.url).searchParams.get("taskId")?.trim() ?? "";
   if (!taskId) return NextResponse.json({ message: "缺少 taskId" }, { status: 400 });

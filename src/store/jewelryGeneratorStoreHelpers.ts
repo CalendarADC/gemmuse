@@ -17,6 +17,9 @@ export async function readHttpErrorMessage(res: Response): Promise<string> {
 
 export function friendlyFetchErrorMessage(e: unknown): string | undefined {
   if (!(e instanceof Error)) return undefined;
+  if (e.name === "AbortError" || /aborted|timed out|timeout/i.test(e.message)) {
+    return "请求超时：服务当前繁忙（数据库或上游生图接口拥堵）。请先将数量调为 1 并稍后重试。";
+  }
   const msg = e.message;
   if (
     msg === "fetch failed" ||

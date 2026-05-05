@@ -5,7 +5,10 @@ import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useJewelryGeneratorStore } from "@/store/jewelryGeneratorStore";
+import { emitToast } from "@/lib/ui/toast";
 import BrandButton from "./BrandButton";
+
+const SIDEBAR_COLLAPSED_KEY = "gemmuse-create-sidebar-collapsed-v1";
 
 function IconTrash({ className }: { className?: string }) {
   return (
@@ -224,6 +227,23 @@ export default function TaskSidebar() {
     null
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  useEffect(() => {
+    try {
+      const v = sessionStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+      if (v === "1") setSidebarCollapsed(true);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [sidebarCollapsed]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const taskMenuRef = useRef<HTMLDivElement>(null);
@@ -231,6 +251,7 @@ export default function TaskSidebar() {
   const [taskDeletePending, setTaskDeletePending] = useState<{ id: string; name: string } | null>(
     null
   );
+  const createTaskInFlightRef = useRef(false);
 
   const busyGlobal = status.step1Generating || status.step3Generating || status.step4Generating;
 
@@ -313,34 +334,37 @@ export default function TaskSidebar() {
 
   return (
     <aside
-      className={`flex min-h-0 w-full flex-col border-b border-[rgba(94,111,130,0.14)] bg-[var(--create-surface-canvas)] transition-[width,max-height] duration-200 ease-out lg:flex-1 lg:border-b-0 lg:border-r lg:border-[rgba(94,111,130,0.14)] ${
+      className={`relative z-[1] flex min-h-0 flex-col border-b border-[rgba(94,111,130,0.14)] bg-[var(--create-surface-canvas)] transition-[width,max-height] duration-200 ease-out lg:flex-1 lg:border-b-0 lg:border-r lg:border-[rgba(94,111,130,0.14)] lg:min-h-0 ${
         sidebarCollapsed
-          ? "max-h-[52px] overflow-hidden lg:max-h-none lg:w-12 lg:overflow-visible"
-          : "lg:w-[268px]"
+          ? "max-h-[calc(var(--create-chrome-header-height)+2rem)] w-12 min-w-12 max-w-12 shrink-0 self-start overflow-hidden lg:max-h-none lg:w-12 lg:min-w-12 lg:max-w-12 lg:shrink-0 lg:self-stretch lg:overflow-visible"
+          : "w-full min-w-0 max-w-full self-stretch lg:w-[268px] lg:min-w-[268px] lg:max-w-[268px] lg:shrink-0"
       }`}
     >
       <div
-        className={`flex min-h-[var(--create-chrome-header-height)] shrink-0 items-center py-4 ${
+        className={`grid min-h-[var(--create-chrome-header-height)] shrink-0 items-center py-4 ${
           sidebarCollapsed
-            ? "justify-end px-2 lg:justify-center lg:px-0"
-            : "justify-between gap-2 px-3"
+            ? "grid-cols-1 justify-items-end px-2 lg:justify-items-center lg:px-0"
+            : "grid-cols-[minmax(0,1fr)_auto] gap-2 px-3"
         }`}
+        aria-label={sidebarCollapsed ? "创作模式侧栏" : undefined}
       >
         {!sidebarCollapsed ? (
           <Link
             href="/create/design"
-            className="min-w-0 text-left text-sm font-bold text-[#363028] transition hover:opacity-85"
+            className="block min-w-0 max-w-full truncate text-left text-sm font-bold text-[#363028] transition hover:opacity-85"
           >
             创作模式
           </Link>
-        ) : (
-          <span className="sr-only">创作模式</span>
-        )}
+        ) : null}
         <button
           type="button"
           aria-expanded={!sidebarCollapsed}
-          onClick={() => setSidebarCollapsed((c) => !c)}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#6b5d52] transition hover:bg-[#e8dfd4]/85 hover:text-[#3d3834]"
+          onClick={(e) => {
+            e.stopPropagation();
+            setSidebarCollapsed((c) => !c);
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="relative z-30 flex h-9 w-9 shrink-0 items-center justify-center justify-self-end rounded-lg text-[#6b5d52] transition hover:bg-[#e8dfd4]/85 hover:text-[#3d3834] lg:justify-self-center"
           title={sidebarCollapsed ? "展开侧栏" : "折叠侧栏"}
           aria-label={sidebarCollapsed ? "展开侧栏" : "折叠侧栏"}
         >
@@ -357,16 +381,29 @@ export default function TaskSidebar() {
       <div className="flex flex-col gap-2.5 px-3 py-3">
         <button
           type="button"
-          disabled={busy || busyGlobal}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await createNewTask();
-            } finally {
-              setBusy(false);
+          aria-disabled={busyGlobal}
+          aria-busy={busy}
+          onClick={() => {
+            if (createTaskInFlightRef.current) return;
+            if (busyGlobal) {
+              emitToast({
+                type: "info",
+                message: "生成进行中，请稍后再新建任务。",
+                durationMs: 3200,
+              });
+              return;
             }
+            createTaskInFlightRef.current = true;
+            setBusy(true);
+            void createNewTask()
+              .catch(() => undefined)
+              .finally(() => {
+                createTaskInFlightRef.current = false;
+                setBusy(false);
+              });
           }}
-          className="flex w-full items-center gap-2.5 rounded-2xl border border-[rgba(94,111,130,0.12)] bg-[var(--create-surface-paper)] px-3.5 py-2.5 text-left text-sm font-normal text-[#a89888] transition hover:bg-[color-mix(in_srgb,var(--create-surface-tray)_12%,var(--create-surface-paper))] active:bg-[color-mix(in_srgb,var(--create-surface-tray)_22%,var(--create-surface-paper))] disabled:cursor-not-allowed disabled:opacity-45"
+          onMouseDown={(e) => e.stopPropagation()}
+          className={`flex w-full items-center gap-2.5 rounded-2xl border border-[rgba(94,111,130,0.12)] bg-[var(--create-surface-paper)] px-3.5 py-2.5 text-left text-sm font-normal text-[#a89888] transition hover:bg-[color-mix(in_srgb,var(--create-surface-tray)_12%,var(--create-surface-paper))] active:bg-[color-mix(in_srgb,var(--create-surface-tray)_22%,var(--create-surface-paper))] ${busyGlobal ? "opacity-55" : ""}`}
         >
           <IconCompose className="h-[18px] w-[18px] shrink-0 text-[#9a9088]" />
           <span>新建任务</span>

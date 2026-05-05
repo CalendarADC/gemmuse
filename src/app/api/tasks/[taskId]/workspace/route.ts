@@ -9,8 +9,8 @@ const privateCacheHeaders = {
   "Cache-Control": "private, no-store, must-revalidate",
 };
 
-export async function GET(_req: Request, ctx: { params: Promise<{ taskId: string }> }) {
-  const authz = await requireApiActiveUser();
+export async function GET(req: Request, ctx: { params: Promise<{ taskId: string }> }) {
+  const authz = await requireApiActiveUser(req);
   if (!authz.ok) return authz.response;
 
   const { taskId } = await ctx.params;

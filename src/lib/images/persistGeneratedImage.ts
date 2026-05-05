@@ -32,7 +32,14 @@ export async function persistGeneratedImage(args: {
   sourceMainImageId?: string;
   debugPromptZh?: string;
   keyPrefix: string;
+  localMode?: boolean;
 }): Promise<{ id: string; url: string; objectKey?: string }> {
+  if (args.localMode) {
+    return {
+      id: `local_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      url: toDataPng(args.base64),
+    };
+  }
   const objectKey = `${args.keyPrefix}/${Date.now()}_${Math.random().toString(16).slice(2)}.png`;
   const uploaded = await uploadPngBase64ToObjectStorage({
     base64: args.base64,

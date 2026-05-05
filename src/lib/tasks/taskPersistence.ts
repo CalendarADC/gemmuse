@@ -45,6 +45,7 @@ export type TaskWorkspaceMeta = {
   step1ExpansionStrength: Step1ExpansionStrength;
   step1FastMode: boolean;
   step2FastMode: boolean;
+  laozhangApiKey?: string;
   selectedMainImageId: string | null;
   selectedMainImageUrl: string | null;
   selectedMainImageIds: string[];
@@ -62,6 +63,7 @@ export const defaultTaskWorkspaceMeta = (): TaskWorkspaceMeta => ({
   step1ExpansionStrength: "standard",
   step1FastMode: false,
   step2FastMode: false,
+  laozhangApiKey: "",
   selectedMainImageId: null,
   selectedMainImageUrl: null,
   selectedMainImageIds: [],
@@ -71,11 +73,16 @@ export const defaultTaskWorkspaceMeta = (): TaskWorkspaceMeta => ({
 });
 
 export function resolvedStep1BananaImageModel(meta: TaskWorkspaceMeta): StepBananaImageModel {
-  if (meta.step1BananaImageModel === "banana-pro" || meta.step1BananaImageModel === "banana-2") {
+  if (
+    meta.step1BananaImageModel === "banana-pro" ||
+    meta.step1BananaImageModel === "banana-2" ||
+    meta.step1BananaImageModel === "gpt-image-2"
+  ) {
     return meta.step1BananaImageModel;
   }
   const legacy = meta.step1ImageModel;
   if (legacy === "banana-2") return "banana-2";
+  if (legacy === "gpt-image-2") return "gpt-image-2";
   if (legacy === "banana-pro") return "banana-pro";
   if (meta.step1ImageBackend === "wuyin" || meta.step1ImageBackend === "laozhang") {
     return "banana-pro";
@@ -84,11 +91,16 @@ export function resolvedStep1BananaImageModel(meta: TaskWorkspaceMeta): StepBana
 }
 
 export function resolvedStep2BananaImageModel(meta: TaskWorkspaceMeta): StepBananaImageModel {
-  if (meta.step2BananaImageModel === "banana-pro" || meta.step2BananaImageModel === "banana-2") {
+  if (
+    meta.step2BananaImageModel === "banana-pro" ||
+    meta.step2BananaImageModel === "banana-2" ||
+    meta.step2BananaImageModel === "gpt-image-2"
+  ) {
     return meta.step2BananaImageModel;
   }
   const legacy2 = meta.step2ImageModel;
   if (legacy2 === "banana-2") return "banana-2";
+  if (legacy2 === "gpt-image-2") return "gpt-image-2";
   if (legacy2 === "banana-pro") return "banana-pro";
   if (meta.step2ImageBackend === "wuyin" || meta.step2ImageBackend === "laozhang") {
     return "banana-pro";
@@ -189,10 +201,11 @@ export async function migrateLegacyIdbToTask(taskId: string): Promise<boolean> {
 
   if (taskHasStoredImages) return false;
 
-  const metaExisting = await idbGet<TaskWorkspaceMeta | undefined>(k.meta);
+  // 在此前多次 await 间隙，用户可能已向当前 task 写入 meta（例如 API Key）。避免用陈旧快照覆盖最新 meta。
+  const metaFresh = await idbGet<TaskWorkspaceMeta | undefined>(k.meta);
 
   await saveTaskToIdb(taskId, {
-    meta: metaExisting ?? defaultTaskWorkspaceMeta(),
+    meta: metaFresh ?? defaultTaskWorkspaceMeta(),
     mainImages: Array.isArray(mainL) ? mainL : [],
     mainHistoryImages: Array.isArray(mainHistL) ? mainHistL : [],
     galleryImages: Array.isArray(galleryL) ? galleryL : [],

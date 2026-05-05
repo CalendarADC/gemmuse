@@ -26,7 +26,17 @@ import {
   mergeTaskWorkspaceWithServer,
   pickLatestMainTimeCluster,
 } from "@/lib/tasks/mergeServerWorkspace";
+import {
+  isDesktopLocalClientMode,
+  isWebStrictLocalClientMode,
+  withDesktopLocalHeader,
+} from "@/lib/runtime/desktopLocalMode";
 import { emitToast } from "@/lib/ui/toast";
+import {
+  hydrateLaozhangApiKeyFromIndexedDb,
+  readClientLaozhangApiKey,
+  writeClientLaozhangApiKey,
+} from "@/lib/laozhangKeyClientStorage";
 
 import type {
   AIProvider,
@@ -76,9 +86,163 @@ if (typeof window !== "undefined") {
   currentUserScopeId = localStorage.getItem(USER_SCOPE_LS_KEY)?.trim() || null;
 }
 
+function readScopedLaozhangApiKey(): string {
+  return readClientLaozhangApiKey();
+}
+
+function writeScopedLaozhangApiKey(v: string): void {
+  writeClientLaozhangApiKey(v);
+}
+
 type ApiError = {
   message?: string;
 };
+
+function shouldSyncServerTasks(): boolean {
+  if (isDesktopLocalClientMode()) return false;
+  if (isWebStrictLocalClientMode()) return false;
+  return true;
+}
+
+function jsonApiHeaders(laozhangApiKey?: string): HeadersInit {
+  const h = new Headers(withDesktopLocalHeader({ "Content-Type": "application/json" }));
+  if (laozhangApiKey?.trim()) h.set("x-laozhang-api-key", laozhangApiKey.trim());
+  return h;
+}
+
+async function fetchJsonWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs = 120_000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal, credentials: "include" });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function estimateDataUrlBytes(dataUrl: string): number {
+  const i = dataUrl.indexOf(",");
+  if (i < 0) return 0;
+  const b64 = dataUrl.slice(i + 1);
+  return Math.floor((b64.length * 3) / 4);
+}
+
+function getDataUrlMime(dataUrl: string): string {
+  const m = /^data:([^;,]+)[;,]/i.exec(dataUrl);
+  return m?.[1]?.toLowerCase() || "image/png";
+}
+
+async function compressDataUrlForEnhanceTransport(dataUrl: string, maxBytes = 2_600_000): Promise<string> {
+  if (typeof window === "undefined") return dataUrl;
+  if (!dataUrl.startsWith("data:image/")) return dataUrl;
+  if (estimateDataUrlBytes(dataUrl) <= maxBytes) return dataUrl;
+  const img = new Image();
+  const loaded = new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error("enhance transport image decode failed"));
+  });
+  img.src = dataUrl;
+  await loaded;
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return dataUrl;
+
+  const originalMime = getDataUrlMime(dataUrl);
+  const isJpegLike = originalMime === "image/jpeg" || originalMime === "image/jpg";
+  let width = img.naturalWidth || img.width;
+  let height = img.naturalHeight || img.height;
+  let best = dataUrl;
+  const maxDimension = 2200;
+  const ratio0 = width > height ? maxDimension / width : maxDimension / height;
+  if (ratio0 < 1) {
+    width = Math.max(320, Math.round(width * ratio0));
+    height = Math.max(320, Math.round(height * ratio0));
+  }
+
+  for (let pass = 0; pass < 8; pass++) {
+    canvas.width = width;
+    canvas.height = height;
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+    const pngLikeOut = isJpegLike
+      ? canvas.toDataURL("image/jpeg", 0.94)
+      : canvas.toDataURL(originalMime === "image/webp" ? "image/webp" : "image/png");
+    if (!best || estimateDataUrlBytes(pngLikeOut) < estimateDataUrlBytes(best)) best = pngLikeOut;
+    if (estimateDataUrlBytes(pngLikeOut) <= maxBytes) return pngLikeOut;
+
+    // 最后兜底：只在仍过大时再降到高质量 JPEG，优先保证语义不漂移。
+    const jpegOut = canvas.toDataURL("image/jpeg", 0.92);
+    if (estimateDataUrlBytes(jpegOut) < estimateDataUrlBytes(best)) best = jpegOut;
+    if (estimateDataUrlBytes(jpegOut) <= maxBytes) return jpegOut;
+
+    width = Math.max(320, Math.round(width * 0.86));
+    height = Math.max(320, Math.round(height * 0.86));
+    if (width <= 320 || height <= 320) {
+      break;
+    }
+  }
+  return best;
+}
+
+async function prepareEnhanceInputUrl(url: string): Promise<string> {
+  if (!url.startsWith("data:image/")) return url;
+  try {
+    return await compressDataUrlForEnhanceTransport(url, 2_600_000);
+  } catch {
+    return url;
+  }
+}
+
+function buildSingleShotPlans(args: {
+  onModel: boolean;
+  left: boolean;
+  right: boolean;
+  rear: boolean;
+  front: boolean;
+}): Array<{ onModel: boolean; left: boolean; right: boolean; rear: boolean; front: boolean }> {
+  const plans: Array<{ onModel: boolean; left: boolean; right: boolean; rear: boolean; front: boolean }> = [];
+  if (args.onModel) plans.push({ onModel: true, left: false, right: false, rear: false, front: false });
+  if (args.left) plans.push({ onModel: false, left: true, right: false, rear: false, front: false });
+  if (args.right) plans.push({ onModel: false, left: false, right: true, rear: false, front: false });
+  if (args.rear) plans.push({ onModel: false, left: false, right: false, rear: true, front: false });
+  if (args.front) plans.push({ onModel: false, left: false, right: false, rear: false, front: true });
+  return plans;
+}
+
+const STEP1_TIMEOUT_BASE_MS = 180_000;
+const STEP1_TIMEOUT_PER_IMAGE_MS = 120_000;
+const ENHANCE_TIMEOUT_BASE_MS = 180_000;
+const ENHANCE_TIMEOUT_PER_SHOT_MS = 120_000;
+const MAX_DYNAMIC_TIMEOUT_MS = 900_000;
+
+function clampTimeoutMs(v: number): number {
+  return Math.max(60_000, Math.min(MAX_DYNAMIC_TIMEOUT_MS, Math.floor(v)));
+}
+
+function computeStep1TimeoutMs(imageCount: number): number {
+  const count = Math.max(1, Math.min(5, Math.floor(imageCount || 1)));
+  return clampTimeoutMs(STEP1_TIMEOUT_BASE_MS + (count - 1) * STEP1_TIMEOUT_PER_IMAGE_MS);
+}
+
+function computeEnhanceTimeoutMs(args: {
+  onModel: boolean;
+  left: boolean;
+  right: boolean;
+  rear: boolean;
+  front: boolean;
+}): number {
+  const shots =
+    (args.onModel ? 1 : 0) +
+    (args.left ? 1 : 0) +
+    (args.right ? 1 : 0) +
+    (args.rear ? 1 : 0) +
+    (args.front ? 1 : 0);
+  return clampTimeoutMs(ENHANCE_TIMEOUT_BASE_MS + Math.max(0, shots - 1) * ENHANCE_TIMEOUT_PER_SHOT_MS);
+}
 
 function pickTaskMeta(s: JewelryGeneratorStore): TaskWorkspaceMeta {
   return {
@@ -90,6 +254,7 @@ function pickTaskMeta(s: JewelryGeneratorStore): TaskWorkspaceMeta {
     step1ExpansionStrength: s.step1ExpansionStrength,
     step1FastMode: s.step1FastMode,
     step2FastMode: s.step2FastMode,
+    laozhangApiKey: s.laozhangApiKey,
     selectedMainImageId: s.selectedMainImageId,
     selectedMainImageUrl: s.selectedMainImageUrl,
     selectedMainImageIds: s.selectedMainImageIds,
@@ -143,6 +308,14 @@ function mergeLoadedWorkspaceWithMemory(activeId: string, loaded: TaskIdbPayload
     return {
       ...loaded,
       meta: { ...loaded.meta, ...pickTaskMeta(mem) },
+    };
+  }
+
+  // API Key 原先仅靠防抖写入 meta；hydration 若在落盘前读到旧快照会覆盖内存里的密钥（桌面端明显）。
+  if (!loaded.meta.laozhangApiKey?.trim() && mem.laozhangApiKey?.trim()) {
+    return {
+      ...loaded,
+      meta: { ...loaded.meta, laozhangApiKey: mem.laozhangApiKey },
     };
   }
 
@@ -208,6 +381,9 @@ function clearTaskPromptBackup(taskId: string) {
 
 /** 防止快速连续点击时，较早发起的 switchTask 在 await 之后覆盖较晚选择的目标任务。 */
 let switchTaskHeadId: string | null = null;
+let step1RecoverInFlight = false;
+let step1RecoverLastAttemptAt = 0;
+const STEP1_RECOVER_MIN_INTERVAL_MS = 20_000;
 
 type TaskSwitchDerived = {
   promptForTask: string;
@@ -265,6 +441,8 @@ function buildSwitchedWorkspacePatch(
     step1ExpansionStrength: loaded.meta.step1ExpansionStrength,
     step1FastMode: loaded.meta.step1FastMode,
     step2FastMode: loaded.meta.step2FastMode,
+    laozhangApiKey:
+      readScopedLaozhangApiKey().trim() || (loaded.meta.laozhangApiKey ?? "").trim(),
     selectedMainImageId: derived.selectedMainImageId,
     selectedMainImageUrl: derived.primaryImg?.url ?? null,
     selectedMainImageIds: derived.selectedMainImageIds,
@@ -341,6 +519,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
       step1ExpansionStrength: "standard",
       step1FastMode: false,
       step2FastMode: false,
+      laozhangApiKey: "",
       step1ReferenceImageDataUrls: [],
 
       mainImages: [],
@@ -403,6 +582,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           step1ExpansionStrength: "standard",
           step1FastMode: false,
           step2FastMode: false,
+          laozhangApiKey: "",
           step1ReferenceImageDataUrls: [],
           mainImages: [],
           mainHistoryImages: [],
@@ -503,6 +683,15 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         const s = get();
         if (tasksHydrated) scheduleDebouncedTaskMetaSave(s.activeTaskId, pickTaskMeta(s));
       },
+      setLaozhangApiKey: (v) => {
+        const next = v.trim();
+        writeScopedLaozhangApiKey(next);
+        set({ laozhangApiKey: next });
+        const s = get();
+        const meta = pickTaskMeta(s);
+        void idbSet(taskKeys(s.activeTaskId).meta, meta).catch(() => undefined);
+        if (tasksHydrated) scheduleDebouncedTaskMetaSave(s.activeTaskId, meta);
+      },
       addStep1ReferenceImage: (dataUrl) => {
         const s = get();
         if (s.step1ReferenceImageDataUrls.length >= 5) return false;
@@ -538,6 +727,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           step1ExpansionStrength: "standard",
           step1FastMode: false,
           step2FastMode: false,
+          laozhangApiKey: "",
           step1ReferenceImageDataUrls: [],
           mainImages: [],
           mainHistoryImages: [],
@@ -600,6 +790,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         const s = get();
         if (s.status.step1Generating || s.status.step3Generating || s.status.step4Generating) return;
         const taskId = s.activeTaskId;
+        const preservedLaozhangKey = s.laozhangApiKey.trim() || readScopedLaozhangApiKey();
         let loaded = await loadTaskFromIdb(taskId);
         const serverWorkspace = await fetchTaskWorkspaceFromServer(taskId);
         if (!serverWorkspace) return;
@@ -627,6 +818,9 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           ? loaded.mainImages.find((x) => x.id === selectedMainImageId) ??
             loaded.mainHistoryImages.find((x) => x.id === selectedMainImageId)
           : null;
+        const laozhangKeyResolved =
+          preservedLaozhangKey || (loaded.meta.laozhangApiKey ?? "").trim() || "";
+        writeScopedLaozhangApiKey(laozhangKeyResolved);
         set({
           provider: loaded.meta.provider,
           prompt: promptForTask || loaded.meta.prompt,
@@ -636,6 +830,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           step1ExpansionStrength: loaded.meta.step1ExpansionStrength,
           step1FastMode: loaded.meta.step1FastMode,
           step2FastMode: loaded.meta.step2FastMode,
+          laozhangApiKey: laozhangKeyResolved,
           selectedMainImageId,
           selectedMainImageUrl: primaryImg?.url ?? null,
           selectedMainImageIds,
@@ -652,6 +847,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           meta: {
             ...loaded.meta,
             prompt: promptForTask || loaded.meta.prompt,
+            laozhangApiKey: laozhangKeyResolved,
             selectedMainImageId,
             selectedMainImageUrl: primaryImg?.url ?? null,
             selectedMainImageIds,
@@ -666,33 +862,47 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
       createNewTask: async (name) => {
         const s = get();
         if (s.status.step1Generating || s.status.step3Generating || s.status.step4Generating) {
-          set({ error: "生成中无法新建任务，请等待完成。" });
+          const msg = "生成中无法新建任务，请等待完成。";
+          set({ error: msg });
+          emitToast({ type: "info", message: msg, durationMs: 4200 });
           return;
         }
         flushDebouncedTaskMetaSave();
         flushTaskPromptBackup(s.activeTaskId, s.prompt);
         try {
-          await persistActiveWorkspace(s);
+          await Promise.race([
+            persistActiveWorkspace(s),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("persist-timeout")), 5000)
+            ),
+          ]);
         } catch {
-          /* ignore */
+          /* IndexedDB 偶发卡死时仍允许新建任务，避免侧栏按钮长时间无响应 */
         }
         const taskName = (name?.trim() || `新任务 ${s.tasks.length + 1}`).slice(0, 80);
         let createdServerTaskId: string | null = null;
-        try {
-          const res = await fetch("/api/tasks", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: taskName }),
-          });
-          if (res.ok) {
-            const data = (await res.json().catch(() => ({}))) as { task?: { id?: string } };
-            createdServerTaskId = typeof data.task?.id === "string" ? data.task.id : null;
+        if (shouldSyncServerTasks()) {
+          try {
+            const res = await fetchJsonWithTimeout(
+              "/api/tasks",
+              {
+                method: "POST",
+                headers: jsonApiHeaders(),
+                body: JSON.stringify({ name: taskName }),
+              },
+              25_000
+            );
+            if (res.ok) {
+              const data = (await res.json().catch(() => ({}))) as { task?: { id?: string } };
+              createdServerTaskId = typeof data.task?.id === "string" ? data.task.id : null;
+            }
+          } catch {
+            /* keep local fallback */
           }
-        } catch {
-          /* keep local fallback */
         }
         const now = new Date().toISOString();
         const id = createdServerTaskId ?? newTaskId();
+        const carryLaozhangKey = s.laozhangApiKey.trim() || readScopedLaozhangApiKey();
         set({
           tasks: [
             ...s.tasks.map((t) =>
@@ -719,6 +929,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           step1ExpansionStrength: "standard",
           step1FastMode: false,
           step2FastMode: false,
+          laozhangApiKey: carryLaozhangKey,
           step1ReferenceImageDataUrls: [],
           mainImages: [],
           mainHistoryImages: [],
@@ -795,11 +1006,13 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             t.id === taskId ? { ...t, name: trimmed, updatedAt: now } : t
           ),
         }));
-        void fetch("/api/tasks", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ taskId, name: trimmed }),
-        }).catch(() => undefined);
+        if (shouldSyncServerTasks()) {
+          void fetch("/api/tasks", {
+            method: "PATCH",
+            headers: jsonApiHeaders(),
+            body: JSON.stringify({ taskId, name: trimmed }),
+          }).catch(() => undefined);
+        }
       },
 
       setTaskProtected: (taskId, isProtected) => {
@@ -810,11 +1023,13 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           ),
           error: null,
         }));
-        void fetch("/api/tasks", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ taskId, isProtected }),
-        }).catch(() => undefined);
+        if (shouldSyncServerTasks()) {
+          void fetch("/api/tasks", {
+            method: "PATCH",
+            headers: jsonApiHeaders(),
+            body: JSON.stringify({ taskId, isProtected }),
+          }).catch(() => undefined);
+        }
       },
 
       deleteTask: async (taskId) => {
@@ -838,7 +1053,12 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         const nextTasks = s.tasks.filter((t) => t.id !== taskId);
         await deleteTaskFromIdb(taskId).catch(() => undefined);
         clearTaskPromptBackup(taskId);
-        void fetch(`/api/tasks?taskId=${encodeURIComponent(taskId)}`, { method: "DELETE" }).catch(() => undefined);
+        if (shouldSyncServerTasks()) {
+          void fetch(`/api/tasks?taskId=${encodeURIComponent(taskId)}`, {
+            method: "DELETE",
+            headers: withDesktopLocalHeader(),
+          }).catch(() => undefined);
+        }
 
         if (s.activeTaskId !== taskId) {
           set({ tasks: nextTasks, error: null });
@@ -870,6 +1090,8 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             loaded.mainHistoryImages.find((x) => x.id === selectedMainImageId)
           : null;
         const now = new Date().toISOString();
+        const laozhangForNext =
+          readScopedLaozhangApiKey().trim() || (loaded.meta.laozhangApiKey ?? "").trim();
         set({
           tasks: nextTasks.map((t) => (t.id === nextId ? { ...t, updatedAt: now } : t)),
           activeTaskId: nextId,
@@ -882,6 +1104,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           step1ExpansionStrength: loaded.meta.step1ExpansionStrength,
           step1FastMode: loaded.meta.step1FastMode,
           step2FastMode: loaded.meta.step2FastMode,
+          laozhangApiKey: laozhangForNext,
           selectedMainImageId,
           selectedMainImageUrl: primaryImg?.url ?? null,
           selectedMainImageIds,
@@ -899,6 +1122,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           meta: {
             ...loaded.meta,
             prompt: promptForNext || loaded.meta.prompt,
+            laozhangApiKey: laozhangForNext,
             selectedMainImageId,
             selectedMainImageUrl: primaryImg?.url ?? null,
             selectedMainImageIds,
@@ -921,13 +1145,15 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           let insertAt = toIdx;
           if (fromIdx < toIdx) insertAt = toIdx - 1;
           next.splice(insertAt, 0, removed);
-          next.forEach((t, idx) => {
-            void fetch("/api/tasks", {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ taskId: t.id, sortOrder: idx }),
-            }).catch(() => undefined);
-          });
+          if (shouldSyncServerTasks()) {
+            next.forEach((t, idx) => {
+              void fetch("/api/tasks", {
+                method: "PATCH",
+                headers: jsonApiHeaders(),
+                body: JSON.stringify({ taskId: t.id, sortOrder: idx }),
+              }).catch(() => undefined);
+            });
+          }
           return { tasks: next };
         });
       },
@@ -1011,11 +1237,17 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           step1BananaImageModel,
           step1ExpansionStrength,
           step1FastMode,
+          laozhangApiKey,
           step1ReferenceImageDataUrls,
         } = get();
 
         if (!prompt.trim()) {
           set({ error: "请先填写设计提示词（Prompt）。" });
+          return false;
+        }
+        const effectiveLaozhangApiKey = laozhangApiKey.trim() || readScopedLaozhangApiKey();
+        if (!effectiveLaozhangApiKey) {
+          set({ error: "请先在 Step1 顶部填写老张 API Key。" });
           return false;
         }
 
@@ -1044,11 +1276,12 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         try {
           const { referenceImageDataUrls, cappyCalmLockPreset } =
             await resolveCappyCalmStep1ReferenceDataUrls(prompt, step1ReferenceImageDataUrls);
+          const step1TimeoutMs = computeStep1TimeoutMs(count);
           // 约定返回：
           // { images: [{ id, url, createdAt? }, ...] }
-          const res = await fetch("/api/generate-main", {
+          const res = await fetchJsonWithTimeout("/api/generate-main", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: jsonApiHeaders(effectiveLaozhangApiKey),
             body: JSON.stringify({
               prompt,
               taskId: activeTaskId,
@@ -1060,7 +1293,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               ...(referenceImageDataUrls.length ? { referenceImageDataUrls } : {}),
               ...(cappyCalmLockPreset ? { cappyCalmLockPreset } : {}),
             }),
-          });
+          }, step1TimeoutMs);
 
           if (!res.ok) {
             const data = (await res.json().catch(() => null)) as ApiError | null;
@@ -1104,11 +1337,13 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
                 : t
             ),
           });
-          void fetch("/api/tasks", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ taskId: st.activeTaskId, currentStep: "STEP2", searchLine: line }),
-          }).catch(() => undefined);
+          if (shouldSyncServerTasks()) {
+            void fetch("/api/tasks", {
+              method: "PATCH",
+              headers: jsonApiHeaders(),
+              body: JSON.stringify({ taskId: st.activeTaskId, currentStep: "STEP2", searchLine: line }),
+            }).catch(() => undefined);
+          }
           const stAfter = get();
           // 必须在 hydration 完成前也落盘：否则用户很快生图并刷新时 meta.prompt 从未写入，刷新后输入框为空。
           flushDebouncedTaskMetaSave();
@@ -1147,58 +1382,69 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
       recoverStep1FromServerIfComplete: async () => {
         const s = get();
         if (!s.status.step1Generating || !step1RecoverPreMainIdSet) return false;
+        const nowMs = Date.now();
+        if (step1RecoverInFlight) return false;
+        if (nowMs - step1RecoverLastAttemptAt < STEP1_RECOVER_MIN_INTERVAL_MS) return false;
+        step1RecoverInFlight = true;
+        step1RecoverLastAttemptAt = nowMs;
         const taskId = s.activeTaskId;
         const preSet = step1RecoverPreMainIdSet;
-        let loaded = await loadTaskFromIdb(taskId);
-        const serverWorkspace = await fetchTaskWorkspaceFromServer(taskId);
-        if (!serverWorkspace?.images?.length) return false;
-        loaded = mergeTaskWorkspaceWithServer(loaded, serverWorkspace);
-        const newMains = loaded.mainHistoryImages.filter((m) => !preSet.has(m.id));
-        if (!newMains.length) return false;
-        const batch = pickLatestMainTimeCluster(newMains, s.count);
-        if (!batch.length) return false;
-
-        const prompt = s.prompt;
-        const line = prompt.trim().slice(0, 160);
-        const incomingIds = new Set(batch.map((x) => x.id));
-        const historyWithoutIncoming = loaded.mainHistoryImages.filter((h) => !incomingIds.has(h.id));
-        const first = batch[0];
-        const now = new Date().toISOString();
-        set({
-          mainImages: batch,
-          mainHistoryImages: [...batch, ...historyWithoutIncoming],
-          selectedMainImageId: first?.id ?? null,
-          selectedMainImageUrl: first?.url ?? null,
-          selectedMainImageIds: first?.id ? [first.id] : [],
-          status: withStep1Generating(s.status, false),
-          error: null,
-          tasks: s.tasks.map((t) =>
-            t.id === s.activeTaskId
-              ? {
-                  ...t,
-                  updatedAt: now,
-                  currentStep: "STEP2",
-                  searchLine: line || t.searchLine,
-                  lastSuccessPrompt: prompt.trim() || t.lastSuccessPrompt,
-                }
-              : t
-          ),
-        });
-        step1RecoverPreMainIdSet = null;
-        void fetch("/api/tasks", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ taskId: s.activeTaskId, currentStep: "STEP2", searchLine: line }),
-        }).catch(() => undefined);
-        const stAfter = get();
-        flushDebouncedTaskMetaSave();
         try {
-          await persistActiveWorkspace(stAfter);
-        } catch (err) {
-          console.warn("[GemMuse] persistActiveWorkspace failed after Step1 recover", err);
+          let loaded = await loadTaskFromIdb(taskId);
+          const serverWorkspace = await fetchTaskWorkspaceFromServer(taskId);
+          if (!serverWorkspace?.images?.length) return false;
+          loaded = mergeTaskWorkspaceWithServer(loaded, serverWorkspace);
+          const newMains = loaded.mainHistoryImages.filter((m) => !preSet.has(m.id));
+          if (!newMains.length) return false;
+          const batch = pickLatestMainTimeCluster(newMains, s.count);
+          if (!batch.length) return false;
+
+          const prompt = s.prompt;
+          const line = prompt.trim().slice(0, 160);
+          const incomingIds = new Set(batch.map((x) => x.id));
+          const historyWithoutIncoming = loaded.mainHistoryImages.filter((h) => !incomingIds.has(h.id));
+          const first = batch[0];
+          const now = new Date().toISOString();
+          set({
+            mainImages: batch,
+            mainHistoryImages: [...batch, ...historyWithoutIncoming],
+            selectedMainImageId: first?.id ?? null,
+            selectedMainImageUrl: first?.url ?? null,
+            selectedMainImageIds: first?.id ? [first.id] : [],
+            status: withStep1Generating(s.status, false),
+            error: null,
+            tasks: s.tasks.map((t) =>
+              t.id === s.activeTaskId
+                ? {
+                    ...t,
+                    updatedAt: now,
+                    currentStep: "STEP2",
+                    searchLine: line || t.searchLine,
+                    lastSuccessPrompt: prompt.trim() || t.lastSuccessPrompt,
+                  }
+                : t
+            ),
+          });
+          step1RecoverPreMainIdSet = null;
+          if (shouldSyncServerTasks()) {
+            void fetch("/api/tasks", {
+              method: "PATCH",
+              headers: jsonApiHeaders(),
+              body: JSON.stringify({ taskId: s.activeTaskId, currentStep: "STEP2", searchLine: line }),
+            }).catch(() => undefined);
+          }
+          const stAfter = get();
+          flushDebouncedTaskMetaSave();
+          try {
+            await persistActiveWorkspace(stAfter);
+          } catch (err) {
+            console.warn("[GemMuse] persistActiveWorkspace failed after Step1 recover", err);
+          }
+          flushTaskPromptBackup(stAfter.activeTaskId, stAfter.prompt);
+          return true;
+        } finally {
+          step1RecoverInFlight = false;
         }
-        flushTaskPromptBackup(stAfter.activeTaskId, stAfter.prompt);
-        return true;
       },
 
       regenerateMainImage: async (id) => {
@@ -1209,12 +1455,18 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           step2BananaImageModel,
           step1ExpansionStrength,
           step1FastMode,
+          laozhangApiKey,
           mainImages,
           step1ReferenceImageDataUrls,
         } = get();
 
         if (!prompt.trim()) {
           set({ error: "请先填写设计提示词（Prompt）。" });
+          return;
+        }
+        const effectiveLaozhangApiKey = laozhangApiKey.trim() || readScopedLaozhangApiKey();
+        if (!effectiveLaozhangApiKey) {
+          set({ error: "请先在 Step1 顶部填写老张 API Key。" });
           return;
         }
 
@@ -1233,9 +1485,9 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           const { referenceImageDataUrls, cappyCalmLockPreset } =
             await resolveCappyCalmStep1ReferenceDataUrls(prompt, step1ReferenceImageDataUrls);
           // 只生成 1 张并替换该 id
-          const res = await fetch("/api/generate-main", {
+          const res = await fetchJsonWithTimeout("/api/generate-main", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: jsonApiHeaders(effectiveLaozhangApiKey),
             body: JSON.stringify({
               prompt,
               taskId: activeTaskId,
@@ -1362,6 +1614,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           activeTaskId,
           step2FastMode,
           step2BananaImageModel,
+          laozhangApiKey,
           selectedMainImageIds,
           mainImages,
           mainHistoryImages,
@@ -1374,6 +1627,11 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
 
         if (!selectedMainImageIds.length) {
           set({ error: "请先在 Step 2 选择至少一张主视图。" });
+          return false;
+        }
+        const effectiveLaozhangApiKey = laozhangApiKey.trim() || readScopedLaozhangApiKey();
+        if (!effectiveLaozhangApiKey) {
+          set({ error: "请先在 Step1 顶部填写老张 API Key。" });
           return false;
         }
         if (!onModel && !left && !right && !rear && !front) {
@@ -1412,41 +1670,56 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
 
           // 多张主图时**顺序**请求 /api/enhance：并行会同时占满 Prisma 连接池（常见 limit=5），
           // 易触发「Timed out fetching a new connection」并表现为 HTTP 500。
+          // 同时选左右视图时拆成独立请求，避免左右相机位互相污染导致“同侧图”。
           const merged: GalleryImage[] = [];
           for (const item of selectedItems) {
-            const res = await fetch("/api/enhance", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                provider,
-                taskId: activeTaskId,
-                prompt,
-                fastMode: step2FastMode,
-                bananaImageModel: step2BananaImageModel,
-                selectedMainImageId: item.id,
-                selectedMainImageUrl: item.url,
-                onModel,
-                left,
-                right,
-                rear,
-                front: !!front,
-              }),
-            });
+            const requestPlans = buildSingleShotPlans({ onModel, left, right, rear, front: !!front });
 
-            if (!res.ok) {
-              const detail = await readHttpErrorMessage(res);
-              throw new Error(detail || `增强失败（HTTP ${res.status}）`);
+            const itemImages: GalleryImage[] = [];
+            for (const plan of requestPlans) {
+              const selectedMainImageUrl = await prepareEnhanceInputUrl(item.url);
+              const enhanceTimeoutMs = computeEnhanceTimeoutMs(plan);
+              const res = await fetchJsonWithTimeout("/api/enhance", {
+                method: "POST",
+                headers: jsonApiHeaders(effectiveLaozhangApiKey),
+                body: JSON.stringify({
+                  provider,
+                  taskId: activeTaskId,
+                  prompt,
+                  fastMode: step2FastMode,
+                  bananaImageModel: step2BananaImageModel,
+                  selectedMainImageId: item.id,
+                  selectedMainImageUrl,
+                  onModel: plan.onModel,
+                  left: plan.left,
+                  right: plan.right,
+                  rear: plan.rear,
+                  front: plan.front,
+                }),
+              }, enhanceTimeoutMs);
+
+              if (!res.ok) {
+                const detail = await readHttpErrorMessage(res);
+                throw new Error(detail || `增强失败（HTTP ${res.status}）`);
+              }
+
+              const data = (await res.json()) as { galleryImages: GalleryImage[] };
+              const raw = data.galleryImages ?? [];
+              itemImages.push(
+                ...raw.map((img) => ({
+                  ...img,
+                  setId,
+                  setCreatedAt,
+                }))
+              );
             }
 
-            const data = (await res.json()) as { galleryImages: GalleryImage[] };
-            const raw = data.galleryImages ?? [];
-            merged.push(
-              ...raw.map((img) => ({
-                ...img,
-                setId,
-                setCreatedAt,
-              }))
-            );
+            const byType = new Map<string, GalleryImage>();
+            for (const img of itemImages) {
+              const key = `${img.sourceMainImageId}::${img.type}`;
+              if (!byType.has(key)) byType.set(key, img);
+            }
+            merged.push(...byType.values());
           }
 
           set({
@@ -1458,11 +1731,13 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               t.id === get().activeTaskId ? { ...t, currentStep: "STEP3", updatedAt: new Date().toISOString() } : t
             ),
           });
-          void fetch("/api/tasks", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ taskId: get().activeTaskId, currentStep: "STEP3" }),
-          }).catch(() => undefined);
+          if (shouldSyncServerTasks()) {
+            void fetch("/api/tasks", {
+              method: "PATCH",
+              headers: jsonApiHeaders(),
+              body: JSON.stringify({ taskId: get().activeTaskId, currentStep: "STEP3" }),
+            }).catch(() => undefined);
+          }
           const stAfterStep3 = get();
           flushDebouncedTaskMetaSave();
           try {
@@ -1491,6 +1766,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           step2FastMode,
           step2BananaImageModel,
           step1ExpansionStrength,
+          laozhangApiKey,
           mainImages,
           mainHistoryImages,
           galleryImages,
@@ -1506,6 +1782,11 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
 
         if (!prompt.trim()) {
           set({ error: "请先填写设计提示词（Prompt）。" });
+          return;
+        }
+        const effectiveLaozhangApiKey = laozhangApiKey.trim() || readScopedLaozhangApiKey();
+        if (!effectiveLaozhangApiKey) {
+          set({ error: "请先在 Step1 顶部填写老张 API Key。" });
           return;
         }
 
@@ -1549,9 +1830,10 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
 
             const { referenceImageDataUrls, cappyCalmLockPreset } =
               await resolveCappyCalmStep1ReferenceDataUrls(prompt, step1ReferenceImageDataUrls);
-            const res = await fetch("/api/generate-main", {
+            const step1TimeoutMs = computeStep1TimeoutMs(1);
+            const res = await fetchJsonWithTimeout("/api/generate-main", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: jsonApiHeaders(effectiveLaozhangApiKey),
               body: JSON.stringify({
                 prompt,
                 taskId: activeTaskId,
@@ -1563,7 +1845,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
                 ...(referenceImageDataUrls.length ? { referenceImageDataUrls } : {}),
                 ...(cappyCalmLockPreset ? { cappyCalmLockPreset } : {}),
               }),
-            });
+            }, step1TimeoutMs);
 
             if (!res.ok) {
               const data = (await res.json().catch(() => null)) as ApiError | null;
@@ -1601,37 +1883,51 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             });
 
             if (onModel || left || right || rear || front) {
-              const enhanceRes = await fetch("/api/enhance", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  provider,
-                  taskId: activeTaskId,
-                  prompt,
-                  fastMode: step2FastMode,
-                  bananaImageModel: step2BananaImageModel,
-                  selectedMainImageId: sourceMainImageId,
-                  selectedMainImageUrl: newMain.url,
-                  onModel,
-                  left,
-                  right,
-                  rear,
-                  front,
-                }),
-              });
+              const requestPlans = buildSingleShotPlans({ onModel, left, right, rear, front });
 
-              if (!enhanceRes.ok) {
-                const data = (await enhanceRes.json().catch(() => null)) as ApiError | null;
-                const serverMsg =
-                  typeof data?.message === "string" && data.message.trim()
-                    ? data.message.trim()
-                    : "";
-                throw new Error(serverMsg || `刷新展示图失败（HTTP ${enhanceRes.status}）`);
+              const regeneratedImages: GalleryImage[] = [];
+              for (const plan of requestPlans) {
+                const selectedMainImageUrl = await prepareEnhanceInputUrl(newMain.url);
+                const enhanceTimeoutMs = computeEnhanceTimeoutMs(plan);
+                const enhanceRes = await fetchJsonWithTimeout("/api/enhance", {
+                  method: "POST",
+                  headers: jsonApiHeaders(effectiveLaozhangApiKey),
+                  body: JSON.stringify({
+                    provider,
+                    taskId: activeTaskId,
+                    prompt,
+                    fastMode: step2FastMode,
+                    bananaImageModel: step2BananaImageModel,
+                    selectedMainImageId: sourceMainImageId,
+                    selectedMainImageUrl,
+                    onModel: plan.onModel,
+                    left: plan.left,
+                    right: plan.right,
+                    rear: plan.rear,
+                    front: plan.front,
+                  }),
+                }, enhanceTimeoutMs);
+
+                if (!enhanceRes.ok) {
+                  const data = (await enhanceRes.json().catch(() => null)) as ApiError | null;
+                  const serverMsg =
+                    typeof data?.message === "string" && data.message.trim()
+                      ? data.message.trim()
+                      : "";
+                  throw new Error(serverMsg || `刷新展示图失败（HTTP ${enhanceRes.status}）`);
+                }
+
+                const enhanceData = (await enhanceRes.json()) as { galleryImages: GalleryImage[] };
+                const raw = enhanceData.galleryImages ?? [];
+                regeneratedImages.push(...raw.map((img) => ({ ...img, setId, setCreatedAt })));
               }
 
-              const enhanceData = (await enhanceRes.json()) as { galleryImages: GalleryImage[] };
-              const raw = enhanceData.galleryImages ?? [];
-              nextImages = raw.map((img) => ({ ...img, setId, setCreatedAt }));
+              const byType = new Map<string, GalleryImage>();
+              for (const img of regeneratedImages) {
+                const key = `${img.sourceMainImageId}::${img.type}`;
+                if (!byType.has(key)) byType.set(key, img);
+              }
+              nextImages = [...byType.values()];
             } else {
               const fallbackNonce = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
               nextImages = [
@@ -1652,10 +1948,12 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
             const right = targetType === "right";
             const rear = targetType === "rear";
             const front = targetType === "front" || targetType === "top";
+            const selectedMainImageUrl = await prepareEnhanceInputUrl(mainInputUrl ?? "");
 
-            const res = await fetch("/api/enhance", {
+            const enhanceTimeoutMs = computeEnhanceTimeoutMs({ onModel, left, right, rear, front });
+            const res = await fetchJsonWithTimeout("/api/enhance", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: jsonApiHeaders(effectiveLaozhangApiKey),
               body: JSON.stringify({
                 provider,
                 taskId: activeTaskId,
@@ -1663,14 +1961,14 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
                 fastMode: step2FastMode,
                 bananaImageModel: step2BananaImageModel,
                 selectedMainImageId: sourceMainImageId,
-                selectedMainImageUrl: mainInputUrl ?? "",
+                selectedMainImageUrl,
                 onModel,
                 left,
                 right,
                 rear,
                 front,
               }),
-            });
+            }, enhanceTimeoutMs);
 
             if (!res.ok) {
               const data = (await res.json().catch(() => null)) as ApiError | null;
@@ -1800,7 +2098,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         void persistActiveWorkspace(s2).catch(() => undefined);
 
         // 云端删除改为异步，保证确认删除后 UI 立即响应。
-        if (taskId && serverDeleteIds.length) {
+        if (shouldSyncServerTasks() && taskId && serverDeleteIds.length) {
           const WORKSPACE_DELETE_CHUNK = 48;
           void (async () => {
             try {
@@ -1810,7 +2108,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
                   `/api/tasks/${encodeURIComponent(taskId)}/workspace/images`,
                   {
                     method: "DELETE",
-                    headers: { "Content-Type": "application/json" },
+                    headers: jsonApiHeaders(),
                     body: JSON.stringify({ ids: chunk }),
                   }
                 );
@@ -1873,7 +2171,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         void persistActiveWorkspace(s2).catch(() => undefined);
 
         // 云端删除改为异步，保证确认删除后 UI 立即响应。
-        if (taskId && idsArr.length) {
+        if (shouldSyncServerTasks() && taskId && idsArr.length) {
           void (async () => {
             try {
               for (let i = 0; i < idsArr.length; i += WORKSPACE_DELETE_CHUNK) {
@@ -1882,7 +2180,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
                   `/api/tasks/${encodeURIComponent(taskId)}/workspace/images`,
                   {
                     method: "DELETE",
-                    headers: { "Content-Type": "application/json" },
+                    headers: jsonApiHeaders(),
                     body: JSON.stringify({ ids: chunk }),
                   }
                 );
@@ -1921,6 +2219,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           selectedMainImageId,
           selectedMainImageUrl,
           galleryImages,
+          laozhangApiKey,
         } = get();
 
         if (!selectedMainImageId) {
@@ -1929,6 +2228,11 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         }
         if (!selectedMainImageUrl && !galleryImages.length) {
           set({ error: "没有可用的产品图：请先在 Step 2 生成并选中主视图。" });
+          return;
+        }
+        const effectiveLaozhangApiKey = laozhangApiKey.trim() || readScopedLaozhangApiKey();
+        if (!effectiveLaozhangApiKey) {
+          set({ error: "请先在 Step1 顶部填写老张 API Key。" });
           return;
         }
 
@@ -1940,7 +2244,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         try {
           const res = await fetch("/api/generate-copy", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: jsonApiHeaders(effectiveLaozhangApiKey),
             body: JSON.stringify({
               provider,
               taskId: activeTaskId,
@@ -1978,11 +2282,13 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               t.id === get().activeTaskId ? { ...t, currentStep: "STEP4", updatedAt: new Date().toISOString() } : t
             ),
           });
-          void fetch("/api/tasks", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ taskId: get().activeTaskId, currentStep: "STEP4" }),
-          }).catch(() => undefined);
+          if (shouldSyncServerTasks()) {
+            void fetch("/api/tasks", {
+              method: "PATCH",
+              headers: jsonApiHeaders(),
+              body: JSON.stringify({ taskId: get().activeTaskId, currentStep: "STEP4" }),
+            }).catch(() => undefined);
+          }
           const st = get();
           if (tasksHydrated) scheduleDebouncedTaskMetaSave(st.activeTaskId, pickTaskMeta(st));
         } catch (e) {
@@ -2050,6 +2356,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           void (async () => {
             let hydrationDbApplied = false;
             try {
+              await hydrateLaozhangApiKeyFromIndexedDb();
               const s0 = useJewelryGeneratorStore.getState();
             let activeId = s0.activeTaskId;
             if (!s0.tasks.some((t) => t.id === activeId)) {
@@ -2122,6 +2429,14 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               ...loaded,
               meta: { ...loaded.meta, prompt: promptResolved },
             };
+            const snapForApiKey = useJewelryGeneratorStore.getState();
+            const idbLaozhangKey = (loaded.meta.laozhangApiKey ?? "").trim();
+            const memLaozhangKey = snapForApiKey.laozhangApiKey.trim();
+            const lsLaozhangKey = readScopedLaozhangApiKey().trim();
+            /* 用户刚点的「保存」只保证内存 + localStorage；IDB 可能仍是旧快照。优先 mem，再全局 LS，再 IDB。 */
+            const laozhangKeyResolved =
+              memLaozhangKey || lsLaozhangKey || idbLaozhangKey || "";
+            writeScopedLaozhangApiKey(laozhangKeyResolved);
             useJewelryGeneratorStore.setState({
               provider: loaded.meta.provider,
               prompt: promptResolved,
@@ -2131,6 +2446,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               step1ExpansionStrength: loaded.meta.step1ExpansionStrength,
               step1FastMode: loaded.meta.step1FastMode,
               step2FastMode: loaded.meta.step2FastMode,
+              laozhangApiKey: laozhangKeyResolved,
               selectedMainImageId: loaded.meta.selectedMainImageId,
               selectedMainImageUrl: loaded.meta.selectedMainImageUrl,
               selectedMainImageIds: loaded.meta.selectedMainImageIds,
@@ -2167,6 +2483,21 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
   )
 );
 
+// persist 从 `jewelry-generator-v3` 合并完成后立刻执行；早于下方 IndexedDB 异步 hydration，
+// 把已写入 `jewelry-laozhang-api-key-v2` 的密钥灌回 Zustand，避免首屏长时间「未激活」。
+if (typeof window !== "undefined") {
+  useJewelryGeneratorStore.persist.onFinishHydration(() => {
+    void hydrateLaozhangApiKeyFromIndexedDb().then(() => {
+      const fromLs = readScopedLaozhangApiKey().trim();
+      if (!fromLs) return;
+      const cur = useJewelryGeneratorStore.getState().laozhangApiKey.trim();
+      if (!cur) {
+        useJewelryGeneratorStore.setState({ laozhangApiKey: fromLs });
+      }
+    });
+  });
+}
+
 // ========= 按任务写入 IndexedDB（主图 / 历史 / 当前展示图集合） =========
 useJewelryGeneratorStore.subscribe((s, prev) => {
   if (!tasksHydrated) return;
@@ -2195,4 +2526,3 @@ useJewelryGeneratorStore.subscribe((s, prev) => {
     void idbSet(k.gallery, s.galleryImages).catch(() => undefined);
   }
 });
-

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import type { Copywriting, GalleryImage } from "@/store/jewelryGeneratorStore";
 import { laoZhangChatCompletionSingleModel } from "@/lib/ai/laoZhangChatClient";
 import { requireApiActiveUser } from "@/lib/apiAuth";
+import { isDesktopBundledClientRequest } from "@/lib/runtime/desktopLocalMode";
 import { prisma } from "@/lib/db";
 import { ensureOwnedTaskId } from "@/lib/tasks/resolveTask";
 
@@ -182,8 +183,11 @@ function normalizeTagsFromLlm(tags: unknown): string[] {
 }
 
 export async function POST(req: Request) {
-  const authz = await requireApiActiveUser();
+  const authz = await requireApiActiveUser(req);
   if (!authz.ok) return authz.response;
+
+  const desktopUpsert =
+    authz.authSource === "desktop-runtime" && isDesktopBundledClientRequest(req);
 
   let prompt = "";
   try {
@@ -197,7 +201,9 @@ export async function POST(req: Request) {
     if (!prompt.trim()) {
       return NextResponse.json({ message: "?? prompt" }, { status: 400 });
     }
-    const taskId = await ensureOwnedTaskId(authz.user.id, taskIdRaw);
+    const taskId = await ensureOwnedTaskId(authz.user.id, taskIdRaw, {
+      upsertForDesktop: desktopUpsert,
+    });
     if (!taskId) {
       return NextResponse.json({ message: "?? taskId" }, { status: 400 });
     }

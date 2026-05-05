@@ -20,6 +20,14 @@
 # production
 /build
 
+# electron unpacked test output
+/release-win-unpacked/
+/release-build-out/
+/release-dist/
+
+# desktop main compile output (run `npm run desktop:compile`)
+/dist-desktop/
+
 # misc
 .DS_Store
 *.pem

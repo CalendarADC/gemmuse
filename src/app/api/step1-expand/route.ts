@@ -11,7 +11,7 @@ type Body = {
 };
 
 export async function POST(req: Request) {
-  const authz = await requireApiActiveUser();
+  const authz = await requireApiActiveUser(req);
   if (!authz.ok) return authz.response;
 
   const body = (await req.json().catch(() => ({}))) as Partial<Body>;

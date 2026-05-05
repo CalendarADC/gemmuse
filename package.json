@@ -1,6 +1,6 @@
 {
-  "name": "jewelry-ai-generator",
-  "version": "0.1.0",
+  "name": "gemmuse",
+  "version": "2.0.0",
   "description": "GemMuse desktop and web jewelry AI generator",
   "author": "GemMuse",
   "private": true,
@@ -9,6 +9,7 @@
     "dev": "next dev",
     "prebuild": "node scripts/prisma-generate-for-build.mjs",
     "build": "next build",
+    "postbuild": "node scripts/copy-sharp-native.mjs && node scripts/patch-standalone-chdir.mjs && node scripts/sync-standalone-static.mjs && node scripts/sync-standalone-public.mjs",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
@@ -18,7 +19,7 @@
     "desktop:compile": "tsc -p desktop/tsconfig.json",
     "desktop:dev": "tsx desktop/dev.ts",
     "desktop:build": "node desktop/build-release.mjs",
-    "desktop:pack": "electron-builder --win --dir --publish never"
+    "desktop:pack": "node desktop/pack-win-dir.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1030.0",
@@ -33,6 +34,7 @@
     "next-auth": "^4.24.13",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "sharp": "^0.34.5",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
@@ -52,15 +54,14 @@
   },
   "build": {
     "appId": "com.gemmuse.desktop",
-    "productName": "GemMuse Desktop",
+    "productName": "GemMuse 2.0",
+    "executableName": "GemMuseDesktop",
     "artifactName": "${productName}-${version}-${arch}.${ext}",
     "directories": {
       "output": "release-dist"
     },
     "files": [
       ".next/standalone/**/*",
-      ".next/static/**/*",
-      "public/**/*",
       "dist-desktop/**/*",
       "package.json"
     ],

@@ -33,6 +33,7 @@ import {
   userExplicitEnvironmentOrSurfaceInPrompt,
 } from "@/lib/ai/jewelrySoftLimits";
 import { requireApiActiveUser } from "@/lib/apiAuth";
+import { isDesktopBundledClientRequest } from "@/lib/runtime/desktopLocalMode";
 import { persistGeneratedImage } from "@/lib/images/persistGeneratedImage";
 import { buildCappyCalmCharacterLockBlock } from "@/lib/ip/cappyCalm";
 import { ensureOwnedTaskId } from "@/lib/tasks/resolveTask";
@@ -69,7 +70,7 @@ function isValidReferenceDataUrl(v: string): boolean {
 }
 
 export async function POST(req: Request) {
-  const authz = await requireApiActiveUser();
+  const authz = await requireApiActiveUser(req);
   if (!authz.ok) return authz.response;
 
   const body = (await req.json().catch(() => ({}))) as Partial<Body>;
@@ -119,7 +120,12 @@ export async function POST(req: Request) {
   if (!prompt.trim()) {
     return NextResponse.json({ message: "?? prompt" }, { status: 400 });
   }
-  const taskId = await ensureOwnedTaskId(authz.user.id, taskIdRaw);
+  const desktopLocalRuntime =
+    (authz.authSource === "desktop-runtime" || authz.authSource === "desktop-ephemeral") &&
+    isDesktopBundledClientRequest(req);
+  const taskId = await ensureOwnedTaskId(authz.user.id, taskIdRaw, {
+    upsertForDesktop: desktopLocalRuntime,
+  });
   if (!taskId) {
     return NextResponse.json({ message: "?? taskId" }, { status: 400 });
   }
@@ -345,6 +351,7 @@ export async function POST(req: Request) {
         base64,
         debugPromptZh: userFacingExpandedPromptForThis,
         keyPrefix: `users/${authz.user.id}/step1`,
+        localMode: desktopLocalRuntime,
       });
       generated.push({
         id: persisted.id,
