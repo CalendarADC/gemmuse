@@ -960,10 +960,8 @@ export default function Step1Input() {
                           <span className="text-amber-700">✓</span>
                         ) : null}
                       </button>
-                      <div className="pointer-events-none absolute left-full top-1/2 ml-2 -translate-y-1/2 z-[60] hidden max-w-[200px] rounded-xl bg-white px-3 py-2 text-xs text-gray-700 shadow-lg ring-1 ring-gray-200 group-hover:block whitespace-normal">
-                        <div className="font-semibold text-gray-900">{style.label}</div>
-                        <div className="text-[11px] opacity-60">{style.labelEn}</div>
-                        <div className="mt-1 text-[10px] text-gray-600">{style.desc}</div>
+                      <div className="pointer-events-none absolute -bottom-2 left-1/2 z-[80] hidden w-[340px] -translate-x-1/2 translate-y-full whitespace-normal rounded-xl bg-white p-3 text-xs text-gray-700 shadow-xl ring-1 ring-gray-200 group-hover:block">
+                        <div className="text-[11px] leading-relaxed text-gray-600">{style.desc}</div>
                       </div>
                     </div>
                   ))}
