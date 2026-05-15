@@ -12,7 +12,6 @@ import { emitToast } from "@/lib/ui/toast";
 import { downloadImage } from "@/lib/ui/downloadImage";
 import { CREATE_STEP_INSET, CREATE_STEP_PAPER } from "./createStepShell";
 import { step1CircleBtnClass } from "./createToolbarCircleButton";
-import ResolutionToggleIcon from "./ResolutionToggleIcon";
 import { IconStep2Favorites, IconStep2History, IconStep2SelectAll } from "./step2ToolbarIcons";
 
 const STEP2_MODEL_MENU_PANEL =
@@ -73,8 +72,8 @@ export default function Step2Gallery() {
     enhanceGalleryImages,
     deleteMainHistoryImagesByIds,
     error,
-    step2FastMode,
-    setStep2FastMode,
+    step2ImageResolution,
+    setStep2ImageResolution,
     step2BananaImageModel,
     setStep2BananaImageModel,
   } =
@@ -659,17 +658,22 @@ export default function Step2Gallery() {
             <button
               type="button"
               disabled={status.step3Generating}
-              aria-pressed={!step2FastMode}
-              aria-label={step2FastMode ? "极速模式（2K）" : "高清模式（4K）"}
-              title={
-                step2FastMode
-                  ? "当前为极速模式（2K），点击切换为高清模式（4K）"
-                  : "当前为高清模式（4K），点击切换为极速模式（2K）"
-              }
-              className={step1CircleBtnClass(!step2FastMode, status.step3Generating)}
-              onClick={() => setStep2FastMode(!step2FastMode)}
+              aria-pressed={step2ImageResolution !== "1K"}
+              aria-label={`当前分辨率：${step2ImageResolution}，点击切换`}
+              title={`当前分辨率：${step2ImageResolution}，点击切换（1K → 2K → 4K）`}
+              className={step1CircleBtnClass(step2ImageResolution !== "1K", status.step3Generating)}
+              onClick={() => {
+                const next: Record<string, "1K" | "2K" | "4K"> = {
+                  "1K": "2K",
+                  "2K": "4K",
+                  "4K": "1K",
+                };
+                setStep2ImageResolution(next[step2ImageResolution]);
+              }}
             >
-              <ResolutionToggleIcon speed2k={step2FastMode} className="shrink-0" />
+              <span className="pointer-events-none select-none text-sm font-semibold tabular-nums leading-none text-[#454038]">
+                {step2ImageResolution}
+              </span>
             </button>
           </div>
 

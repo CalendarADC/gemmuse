@@ -104,8 +104,8 @@ type Body = {
   prompt: string;
   selectedMainImageId: string;
   selectedMainImageUrl: string;
-  /** true = ???2K??false = ???4K? */
-  fastMode?: boolean;
+  /** 清晰度：1K（最快）、2K（均衡）、4K（最高清） */
+  imageSize?: "1K" | "2K" | "4K";
   onModel: boolean;
   left: boolean;
   right: boolean;
@@ -162,7 +162,11 @@ export async function POST(req: Request) {
   const selectedMainImageId = typeof body.selectedMainImageId === "string" ? body.selectedMainImageId : "";
   const selectedMainImageUrl =
     typeof body.selectedMainImageUrl === "string" ? body.selectedMainImageUrl : "";
-  const fastMode = !!body.fastMode;
+  // 兼容旧版 fastMode（true → 2K, false → 4K），无 imageSize 时默认 1K
+  const imageSizeRaw = body.imageSize as string | undefined;
+  // @ts-expect-error fastMode 为旧版兼容字段，已由 imageSize 替代
+  const fastMode = body.fastMode as boolean | undefined;
+  const resolution = imageSizeRaw || (fastMode === true ? "2K" : fastMode === false ? "4K" : "1K");
 
   const onModel = !!body.onModel;
   const left = !!body.left;
@@ -211,7 +215,7 @@ export async function POST(req: Request) {
     );
 
     const aspectRatio = "1:1" as const;
-    const imageSize: ImageSize = fastMode ? "2K" : "4K";
+    const imageSize: ImageSize = resolution as ImageSize;
     const sharedImgArgs = {
       aspectRatio,
       imageSize,

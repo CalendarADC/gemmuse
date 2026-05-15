@@ -84,11 +84,10 @@ export function step1ExpandFailureUserHint(detail: string): string {
 
 export async function expandStep1PromptWithAi(args: ExpandArgs): Promise<ExpandResult> {
   const apiKey = requireStep1ExpandApiKey();
-  const baseUrl = (process.env.STEP1_EXPAND_BASE_URL || "https://api.modelverse.cn/v1").replace(
-    /\/+$/,
-    ""
-  );
-  const model = process.env.STEP1_EXPAND_MODEL || "gpt-5.4";
+  const baseUrl = (
+    process.env.STEP1_EXPAND_BASE_URL || "https://ark.cn-beijing.volces.com/api/coding/v3"
+  ).replace(/\/+$/, "");
+  const model = process.env.STEP1_EXPAND_MODEL || "ark-code-latest";
 
   const system = [
     "You are a senior jewelry concept prompt expander for Chinese-speaking users.",

@@ -194,7 +194,7 @@ export default function Step1Input() {
     count,
     step1BananaImageModel,
     step1ExpansionStrength,
-    step1FastMode,
+    step1ImageResolution,
     status,
     error,
     step1ReferenceImageDataUrls,
@@ -202,7 +202,7 @@ export default function Step1Input() {
     setCount,
     setStep1BananaImageModel,
     setStep1ExpansionStrength,
-    setStep1FastMode,
+    setStep1ImageResolution,
     setProvider,
     addStep1ReferenceImage,
     removeStep1ReferenceImageAt,
@@ -816,20 +816,23 @@ export default function Step1Input() {
             <button
               type="button"
               disabled={isGenerating}
-              aria-pressed={!step1FastMode}
-              aria-label={step1FastMode ? "极速模式（2K）" : "高清模式（4K）"}
-              title={
-                step1FastMode
-                  ? "当前为极速模式（2K），点击切换为高清模式（4K）"
-                  : "当前为高清模式（4K），点击切换为极速模式（2K）"
-              }
-              className={step1CircleBtnClass(!step1FastMode, isGenerating)}
+              aria-pressed={step1ImageResolution !== "1K"}
+              aria-label={`当前分辨率：${step1ImageResolution}，点击切换`}
+              title={`当前分辨率：${step1ImageResolution}，点击切换（1K → 2K → 4K）`}
+              className={step1CircleBtnClass(step1ImageResolution !== "1K", isGenerating)}
               onClick={(e) => {
                 e.stopPropagation();
-                setStep1FastMode(!step1FastMode);
+                const next: Record<string, "1K" | "2K" | "4K"> = {
+                  "1K": "2K",
+                  "2K": "4K",
+                  "4K": "1K",
+                };
+                setStep1ImageResolution(next[step1ImageResolution]);
               }}
             >
-              <ResolutionToggleIcon speed2k={step1FastMode} className="shrink-0" />
+              <span className="pointer-events-none select-none text-sm font-semibold tabular-nums leading-none text-[#454038]">
+                {step1ImageResolution}
+              </span>
             </button>
 
             {step1ReferenceImageDataUrls.length > 0 ? (

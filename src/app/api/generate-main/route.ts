@@ -45,8 +45,8 @@ type Body = {
   prompt: string;
   count: number;
   provider: string;
-  /** true = ???2K??false = ???4K? */
-  fastMode?: boolean;
+  /** 清晰度：1K（最快）、2K（均衡）、4K（最高清） */
+  imageSize?: "1K" | "2K" | "4K";
   /** Step1 ?????standard????| strong???????? */
   expansionStrength?: PromptExpansionStrength;
   /** Step1 ????data URL???? 3 ????????????? */
@@ -81,7 +81,11 @@ export async function POST(req: Request) {
   const countRaw = typeof body.count === "number" ? body.count : 2;
   const count = Math.min(5, Math.max(1, Math.floor(countRaw)));
   const provider = typeof body.provider === "string" ? body.provider : "nano-banana-pro";
-  const fastMode = !!body.fastMode;
+  // 兼容旧版 fastMode（true → 2K, false → 4K），无 imageSize 时默认 1K
+  const imageSizeRaw = body.imageSize as string | undefined;
+  // @ts-expect-error fastMode 为旧版兼容字段，已由 imageSize 替代
+  const fastMode = body.fastMode as boolean | undefined;
+  const resolution = imageSizeRaw || (fastMode === true ? "2K" : fastMode === false ? "4K" : "1K");
   const expansionStrength: PromptExpansionStrength =
     body.expansionStrength === "strong" ? "strong" : "standard";
   const fromArray = Array.isArray(body.referenceImageDataUrls)
@@ -147,7 +151,7 @@ export async function POST(req: Request) {
 
   // 1:1 ??? Etsy ????????? 2K????????? 4K ????????
   const aspectRatio = "1:1" as const;
-  const imageSize: ImageSize = fastMode ? "2K" : "4K";
+  const imageSize: ImageSize = resolution as ImageSize;
 
   try {
     const images = [];

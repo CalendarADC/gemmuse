@@ -100,8 +100,8 @@ export type JewelryGeneratorStore = {
   step1BananaImageModel: StepBananaImageModel;
   step2BananaImageModel: StepBananaImageModel;
   step1ExpansionStrength: Step1ExpansionStrength;
-  step1FastMode: boolean;
-  step2FastMode: boolean;
+  step1ImageResolution: "1K" | "2K" | "4K";
+  step2ImageResolution: "1K" | "2K" | "4K";
   laozhangApiKey: string;
   /** Step1 可选参考图（data URL），最多 3 张；不写入 persist */
   step1ReferenceImageDataUrls: string[];
@@ -138,8 +138,8 @@ export type JewelryGeneratorStore = {
   setStep1BananaImageModel: (v: StepBananaImageModel) => void;
   setStep2BananaImageModel: (v: StepBananaImageModel) => void;
   setStep1ExpansionStrength: (v: Step1ExpansionStrength) => void;
-  setStep1FastMode: (v: boolean) => void;
-  setStep2FastMode: (v: boolean) => void;
+  setStep1ImageResolution: (v: "1K" | "2K" | "4K") => void;
+  setStep2ImageResolution: (v: "1K" | "2K" | "4K") => void;
   setLaozhangApiKey: (v: string) => void;
   addStep1ReferenceImage: (dataUrl: string) => boolean;
   removeStep1ReferenceImageAt: (index: number) => void;

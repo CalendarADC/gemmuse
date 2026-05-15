@@ -43,8 +43,8 @@ export type TaskWorkspaceMeta = {
   step1ImageModel?: Step1ImageModel;
   step2ImageModel?: Step1ImageModel;
   step1ExpansionStrength: Step1ExpansionStrength;
-  step1FastMode: boolean;
-  step2FastMode: boolean;
+  step1ImageResolution: "1K" | "2K" | "4K";
+  step2ImageResolution: "1K" | "2K" | "4K";
   laozhangApiKey?: string;
   selectedMainImageId: string | null;
   selectedMainImageUrl: string | null;
@@ -61,8 +61,8 @@ export const defaultTaskWorkspaceMeta = (): TaskWorkspaceMeta => ({
   step1BananaImageModel: "banana-pro",
   step2BananaImageModel: "banana-pro",
   step1ExpansionStrength: "standard",
-  step1FastMode: false,
-  step2FastMode: false,
+  step1ImageResolution: "1K",
+  step2ImageResolution: "1K",
   laozhangApiKey: "",
   selectedMainImageId: null,
   selectedMainImageUrl: null,
