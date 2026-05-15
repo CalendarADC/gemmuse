@@ -8,8 +8,8 @@ const LABELS: Record<string, string> = {
   server: "内置服务",
   database: "远程数据库",
   mediaDir: "本地图片目录",
-  sharp: "图像处理 (sharp)",
   r2Bypass: "跳过云存储 (R2)",
+  step1ExpandApiKey: "Step1 AI 扩写密钥",
 };
 
 type RowTone = "ok" | "warn" | "err";
@@ -140,6 +140,20 @@ export default function DesktopStartupPage() {
         <p style={{ marginTop: 16, fontSize: 11, opacity: 0.6, wordBreak: "break-all" }}>
           媒体目录：{data.paths.mediaDir}
         </p>
+      ) : null}
+      {data?.checks.step1ExpandApiKey === "warn" ? (
+        <div style={{ marginTop: 16, padding: 10, background: "#fffbeb", borderRadius: 8, fontSize: 11 }}>
+          <span style={{ fontWeight: 600, color: "#92400e" }}>💡 Step1 AI 扩写尚未配置</span>
+          <div style={{ marginTop: 4, color: "#78350f" }}>
+            如需使用 AI 创意扩写功能，请在 exe 安装目录或用户数据目录新建
+            <code style={{ background: "#fef3c7", padding: "1px 4px", borderRadius: 3 }}>.env.local</code> 文件，填写：
+            <br />
+            <code style={{ background: "#fef3c7", padding: "2px 6px", borderRadius: 3, display: "block", marginTop: 4 }}>
+              STEP1_EXPAND_API_KEY=你的API密钥
+            </code>
+            配置后请重启软件。
+          </div>
+        </div>
       ) : null}
       <p style={{ marginTop: 20, fontSize: 11, opacity: 0.55 }}>
         {data?.dbMode === "off"

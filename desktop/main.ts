@@ -36,10 +36,12 @@ function loadPackagedDesktopEnv(): void {
   const envFile = join(exeDir, ".env");
   const local = join(exeDir, ".env.local");
   const dataEnv = join(app.getPath("userData"), ".env");
+  const dataLocal = join(app.getPath("userData"), ".env.local");
   if (existsSync(example)) loadDotenvFile({ path: example });
   if (existsSync(envFile)) loadDotenvFile({ path: envFile, override: true });
   if (existsSync(local)) loadDotenvFile({ path: local, override: true });
   if (existsSync(dataEnv)) loadDotenvFile({ path: dataEnv, override: true });
+  if (existsSync(dataLocal)) loadDotenvFile({ path: dataLocal, override: true });
   if (!process.env.DATABASE_URL?.trim()) {
     const udExample = join(app.getPath("userData"), ".env.example");
     if (existsSync(udExample)) loadDotenvFile({ path: udExample, override: true });

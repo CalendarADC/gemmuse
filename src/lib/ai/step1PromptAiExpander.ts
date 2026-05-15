@@ -24,6 +24,12 @@ type OpenAiChatResponse = {
 function requireStep1ExpandApiKey(): string {
   const k = process.env.STEP1_EXPAND_API_KEY?.trim();
   if (!k) {
+    const isDesktop = process.env.DESKTOP_LOCAL_IMAGE_STORAGE === "1";
+    if (isDesktop) {
+      throw new Error(
+        "缺少 STEP1_EXPAND_API_KEY。桌面版请在 exe 安装目录或用户数据目录新建 .env.local 并填写 STEP1_EXPAND_API_KEY=你的API密钥，然后重启软件。"
+      );
+    }
     throw new Error(
       "缺少 STEP1_EXPAND_API_KEY。请在 .env.local 配置用于 Step1 强创意改写的新 API Key。"
     );

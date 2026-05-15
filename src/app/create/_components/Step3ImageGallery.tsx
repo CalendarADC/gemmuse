@@ -646,8 +646,10 @@ export default function Step3ImageGallery() {
         if (img.url.startsWith("data:")) {
           zip.file(filename, dataUrlToBlob(img.url));
         } else {
-          const res = await fetch(img.url, { credentials: "same-origin" });
-          if (!res.ok) throw new Error(`failed to fetch ${img.url}`);
+          const isLocalMedia = img.url.startsWith("/api/local-media/");
+          const fetchUrl = isLocalMedia ? img.url : `/api/download-image?url=${encodeURIComponent(img.url)}`;
+          const res = await fetch(fetchUrl, { method: "GET", credentials: "same-origin" });
+          if (!res.ok) throw new Error(`failed to fetch (${res.status}): ${img.url}`);
           const buf = await res.arrayBuffer();
           zip.file(filename, buf);
         }
@@ -655,10 +657,14 @@ export default function Step3ImageGallery() {
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const zipUrl = URL.createObjectURL(zipBlob);
-      await downloadImage(zipUrl, `step3_selected_${new Date().toISOString().slice(0, 10)}.zip`);
-      setTimeout(() => URL.revokeObjectURL(zipUrl), 1000);
+      try {
+        await downloadImage(zipUrl, `step3_selected_${new Date().toISOString().slice(0, 10)}.zip`);
+      } finally {
+        setTimeout(() => URL.revokeObjectURL(zipUrl), 1000);
+      }
     } catch (e) {
       console.error("Zip selected download failed:", e);
+      emitToast({ message: "打包下载失败，请检查网络连接后重试。", type: "error", durationMs: 2200 });
     } finally {
       setIsZipping(false);
     }
@@ -1326,8 +1332,10 @@ export default function Step3ImageGallery() {
                         e.stopPropagation();
                         try {
                           await downloadImage(img.url, `${img.type}_${img.id}.${getDataUrlExt(img.url)}`);
-                        } catch {
-                          emitToast({ message: "下载失败：图片地址不可访问或跨域受限。", type: "error" });
+                        } catch (err) {
+                          console.error("Single image download failed:", err);
+                          const msg = err instanceof Error ? err.message : "";
+                          emitToast({ message: `下载失败：${msg || "图片地址不可访问或跨域受限。"}`, type: "error" });
                         }
                       }}
                       className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-gray-800 ring-1 ring-gray-200 hover:bg-white"
@@ -1706,8 +1714,10 @@ export default function Step3ImageGallery() {
                   onClick={async () => {
                     try {
                       await downloadImage(current.url, `${current.type}_${current.id}.${getDataUrlExt(current.url)}`);
-                    } catch {
-                      emitToast({ message: "下载失败：图片地址不可访问或跨域受限。", type: "error" });
+                    } catch (err) {
+                      console.error("Modal single image download failed:", err);
+                      const msg = err instanceof Error ? err.message : "";
+                      emitToast({ message: `下载失败：${msg || "图片地址不可访问或跨域受限。"}`, type: "error" });
                     }
                   }}
                   className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-semibold"

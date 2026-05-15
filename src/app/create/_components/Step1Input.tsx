@@ -26,7 +26,7 @@ const STEP1_PROMPT_TEXTAREA_MAX_PX = 320;
 /** AI 扩写进行中：琥珀高亮 + 脉冲，与生成按钮禁用态呼应 */
 const STEP1_EXPAND_BULB_CLASS = `${STEP1_CIRCLE_BTN_BASE} pointer-events-none border-amber-400 bg-amber-50 text-amber-900 shadow-[0_0_18px_rgba(245,158,11,0.5)] ring-2 ring-amber-300/80 ring-offset-1 ring-offset-[var(--create-surface-paper)] animate-[pulse_0.85s_ease-in-out_infinite]`;
 
-type Step1ToolbarMenu = "model" | "count";
+type Step1ToolbarMenu = "model" | "count" | "style";
 
 const STEP1_MENU_PANEL =
   "absolute left-0 top-full z-[35] mt-1.5 min-w-[158px] overflow-hidden rounded-xl border border-[rgba(94,111,130,0.18)] bg-[var(--create-surface-paper)] py-1 shadow-lg";
@@ -34,6 +34,37 @@ const STEP1_MENU_PANEL =
 /** 渠道选项文案较长，单独加宽并禁止折行，避免「老张」被拆成两行 */
 const STEP1_MODEL_MENU_PANEL =
   "absolute left-0 top-full z-[35] mt-1.5 min-w-max max-w-[min(100vw-2rem,280px)] overflow-hidden rounded-xl border border-[rgba(94,111,130,0.18)] bg-[var(--create-surface-paper)] py-1 shadow-lg";
+
+const STYLE_OPTIONS = [
+  { id: "gothic", label: "哥特风", labelEn: "Gothic" },
+  { id: "celtic", label: "凯尔特 / 北欧", labelEn: "Celtic & Norse" },
+  { id: "artsCrafts", label: "工艺美术运动", labelEn: "Arts & Crafts" },
+  { id: "artNouveau", label: "新艺术", labelEn: "Art Nouveau" },
+  { id: "mementoMori", label: "维多利亚哀悼风", labelEn: "Memento Mori" },
+  { id: "steampunk", label: "蒸汽朋克", labelEn: "Steampunk" },
+  { id: "brutalist", label: "粗野主义", labelEn: "Brutalist" },
+  { id: "baroque", label: "巴洛克", labelEn: "Baroque" },
+  { id: "rococo", label: "洛可可", labelEn: "Rococo" },
+  { id: "byzantine", label: "拜占庭", labelEn: "Byzantine" },
+];
+
+const MAX_STYLE_SELECTIONS = 3;
+
+/** 魔法帽子图标 - 风格选择器 */
+function IconStyleHat({ className }: { className?: string }) {
+  return (
+    <img
+      src="/icons/step1-style-hat.png"
+      alt=""
+      width={18}
+      height={18}
+      decoding="async"
+      draggable={false}
+      className={["pointer-events-none h-[18px] w-[18px] shrink-0 object-contain select-none", className].filter(Boolean).join(" ")}
+      aria-hidden
+    />
+  );
+}
 
 /** 生图模型按钮：`public/icons/step1-brain.png` */
 function IconStep1Brain({ className }: { className?: string }) {
@@ -225,6 +256,7 @@ export default function Step1Input() {
   const step1StartedAt = status.step1GenerationStartedAt;
   const [step1TimerTick, setStep1TimerTick] = useState(0);
   const [isExpandingPrompt, setIsExpandingPrompt] = useState(false);
+  const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
 
   useEffect(() => {
     // 灯泡改为「即时扩写」后，避免遗留 strong 状态导致生成时重复扩写。
@@ -347,6 +379,39 @@ export default function Step1Input() {
   useEffect(() => {
     setProvider("nano-banana-pro");
   }, [setProvider]);
+
+  const toggleStyle = (styleId: string) => {
+    setSelectedStyles((prev) => {
+      if (prev.includes(styleId)) {
+        return prev.filter((s) => s !== styleId);
+      }
+      if (prev.length >= MAX_STYLE_SELECTIONS) {
+        emitToast({ message: `最多选择 ${MAX_STYLE_SELECTIONS} 种风格`, type: "info" });
+        return prev;
+      }
+      return [...prev, styleId];
+    });
+  };
+
+  const applyStylesToPrompt = () => {
+    if (selectedStyles.length === 0) return;
+    const styleLabels = selectedStyles
+      .map((id) => STYLE_OPTIONS.find((s) => s.id === id)?.label || id)
+      .join(" + ");
+    
+    const currentPrompt = prompt.trim();
+    const stylePrefix = `【${styleLabels}风格】`;
+    
+    if (!currentPrompt) {
+      setPrompt(stylePrefix);
+    } else if (!currentPrompt.includes("【")) {
+      setPrompt(`${stylePrefix} ${currentPrompt}`);
+    }
+    
+    setSelectedStyles([]);
+    setToolbarMenuOpen(null);
+    requestAnimationFrame(() => syncPromptTextareaHeight());
+  };
 
   const appendReferenceFromFile = async (file: File, source: "file" | "paste" | "drop") => {
     if (useJewelryGeneratorStore.getState().step1ReferenceImageDataUrls.length >= MAX_REFERENCE_IMAGES) {
@@ -834,6 +899,71 @@ export default function Step1Input() {
                 {step1ImageResolution}
               </span>
             </button>
+
+            <div className="relative">
+              <button
+                type="button"
+                disabled={isGenerating}
+                aria-haspopup="listbox"
+                aria-expanded={toolbarMenuOpen === "style"}
+                aria-pressed={selectedStyles.length > 0}
+                aria-label="选择风格参考"
+                title={selectedStyles.length > 0 
+                  ? `已选 ${selectedStyles.length} 种风格，点击查看或应用到提示词` 
+                  : "选择您的风格参考，可以试试融合起来！记得点击右侧的扩写按钮打造您的专属灵感。"}
+                className={step1CircleBtnClass(selectedStyles.length > 0, isGenerating)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setToolbarMenuOpen((m) => (m === "style" ? null : "style"));
+                }}
+              >
+                <IconStyleHat className="shrink-0" />
+                {selectedStyles.length > 0 ? (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
+                    {selectedStyles.length}
+                  </span>
+                ) : null}
+              </button>
+              {toolbarMenuOpen === "style" && !isGenerating ? (
+                <div
+                  role="listbox"
+                  aria-label="选择风格参考"
+                  className={`${STEP1_MODEL_MENU_PANEL} w-[220px]`}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  {STYLE_OPTIONS.map((style) => (
+                    <button
+                      key={style.id}
+                      type="button"
+                      role="option"
+                      aria-selected={selectedStyles.includes(style.id)}
+                      className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition ${
+                        selectedStyles.includes(style.id)
+                          ? "bg-amber-50 font-semibold text-amber-900"
+                          : "text-[#363028] hover:bg-[color-mix(in_srgb,var(--create-surface-tray)_12%,var(--create-surface-paper))]"
+                      }`}
+                      onClick={() => toggleStyle(style.id)}
+                    >
+                      <span>{style.label}</span>
+                      <span className="text-xs opacity-60">{style.labelEn}</span>
+                      {selectedStyles.includes(style.id) ? (
+                        <span className="text-amber-700">✓</span>
+                      ) : null}
+                    </button>
+                  ))}
+                  <div className="border-t border-gray-200 px-3 py-2">
+                    <button
+                      type="button"
+                      disabled={selectedStyles.length === 0}
+                      className="w-full rounded-lg bg-amber-500 px-3 py-1.5 text-center text-xs font-semibold text-white transition hover:bg-amber-600 disabled:opacity-40"
+                      onClick={applyStylesToPrompt}
+                    >
+                      应用到提示词
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
 
             {step1ReferenceImageDataUrls.length > 0 ? (
               <button

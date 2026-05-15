@@ -13,8 +13,8 @@ export type DesktopStartupStatus = {
     server: CheckStatus;
     database: CheckStatus;
     mediaDir: CheckStatus;
-    sharp: CheckStatus;
     r2Bypass: CheckStatus;
+    step1ExpandApiKey: CheckStatus;
   };
   paths: { mediaDir: string | null };
   detail?: string;
@@ -34,8 +34,8 @@ export async function collectDesktopStartupStatus(): Promise<DesktopStartupStatu
     server: "ok" as CheckStatus,
     database: "skipped" as CheckStatus,
     mediaDir: "skipped" as CheckStatus,
-    sharp: "skipped" as CheckStatus,
     r2Bypass: envEnabled(process.env.DESKTOP_LOCAL_IMAGE_STORAGE) ? ("ok" as CheckStatus) : ("skipped" as CheckStatus),
+    step1ExpandApiKey: process.env.STEP1_EXPAND_API_KEY?.trim() ? ("ok" as CheckStatus) : ("warn" as CheckStatus),
   };
 
   if (dbMode === "off") {
@@ -80,37 +80,7 @@ export async function collectDesktopStartupStatus(): Promise<DesktopStartupStatu
     checks.mediaDir = "warn";
   }
 
-  try {
-    const sharpMod = await import("sharp").catch(() => null);
-    if (!sharpMod?.default) {
-      checks.sharp = "error";
-      return {
-        ok: false,
-        dbMode,
-        checks,
-        paths: { mediaDir: mediaRoot },
-        detail: "sharp 模块无法加载",
-      };
-    }
-    await sharpMod
-      .default({
-        create: { width: 1, height: 1, channels: 3, background: { r: 0, g: 0, b: 0 } },
-      })
-      .png()
-      .toBuffer();
-    checks.sharp = "ok";
-  } catch (e) {
-    checks.sharp = "error";
-    return {
-      ok: false,
-      dbMode,
-      checks,
-      paths: { mediaDir: mediaRoot },
-      detail: e instanceof Error ? e.message : String(e),
-    };
-  }
-
   const c = checks as DesktopStartupStatus["checks"];
-  const ok = c.database !== "error" && c.mediaDir !== "error" && c.sharp !== "error";
+  const ok = c.database !== "error" && c.mediaDir !== "error";
   return { ok, dbMode, checks: c, paths: { mediaDir: mediaRoot } };
 }
