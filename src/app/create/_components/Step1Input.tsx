@@ -932,7 +932,7 @@ export default function Step1Input() {
                 <div
                   role="listbox"
                   aria-label="选择风格参考"
-                  className={`${STEP1_MODEL_MENU_PANEL} w-[220px]`}
+                  className={`${STEP1_MODEL_MENU_PANEL} w-[420px] grid grid-cols-2 gap-1 p-1`}
                   onMouseDown={(e) => e.stopPropagation()}
                 >
                   {STYLE_OPTIONS.map((style) => (
@@ -941,7 +941,7 @@ export default function Step1Input() {
                       type="button"
                       role="option"
                       aria-selected={selectedStyles.includes(style.id)}
-                      className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm transition ${
+                      className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition ${
                         selectedStyles.includes(style.id)
                           ? "bg-amber-50 font-semibold text-amber-900"
                           : "text-[#363028] hover:bg-[color-mix(in_srgb,var(--create-surface-tray)_12%,var(--create-surface-paper))]"
@@ -949,13 +949,13 @@ export default function Step1Input() {
                       onClick={() => toggleStyle(style.id)}
                     >
                       <span>{style.label}</span>
-                      <span className="text-xs opacity-60">{style.labelEn}</span>
+                      <span className="text-[11px] opacity-60">{style.labelEn}</span>
                       {selectedStyles.includes(style.id) ? (
                         <span className="text-amber-700">✓</span>
                       ) : null}
                     </button>
                   ))}
-                  <div className="border-t border-gray-200 px-3 py-2">
+                  <div className="col-span-2 border-t border-gray-200 px-3 py-2 mt-1">
                     <button
                       type="button"
                       disabled={selectedStyles.length === 0}
