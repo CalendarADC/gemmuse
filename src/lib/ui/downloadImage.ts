@@ -20,6 +20,23 @@ export async function downloadImage(url: string, filename: string): Promise<void
   }
 
   const isHttp = /^https?:\/\//i.test(url);
+  const isLocalMedia = url.startsWith("/api/local-media/");
+
+  if (isLocalMedia) {
+    const res = await fetch(url, { method: "GET", credentials: "same-origin" });
+    if (!res.ok) {
+      throw new Error(`download failed (${res.status})`);
+    }
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    try {
+      triggerBrowserDownload(objectUrl, filename);
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+    return;
+  }
+
   if (!isHttp) {
     triggerBrowserDownload(url, filename, true);
     return;

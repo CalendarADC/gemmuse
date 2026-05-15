@@ -643,7 +643,14 @@ export default function Step3ImageGallery() {
       for (const img of selected) {
         const ext = getDataUrlExt(img.url);
         const filename = `${img.type}_${img.id}.${ext}`;
-        zip.file(filename, dataUrlToBlob(img.url));
+        if (img.url.startsWith("data:")) {
+          zip.file(filename, dataUrlToBlob(img.url));
+        } else {
+          const res = await fetch(img.url, { credentials: "same-origin" });
+          if (!res.ok) throw new Error(`failed to fetch ${img.url}`);
+          const buf = await res.arrayBuffer();
+          zip.file(filename, buf);
+        }
       }
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
