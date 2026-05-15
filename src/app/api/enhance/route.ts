@@ -3,11 +3,10 @@ import { NextResponse } from "next/server";
 import type { GalleryImage, GalleryImageType } from "@/store/jewelryGeneratorStore";
 
 import {
-  LAOZHANG_IMAGE_MODEL_FLASH,
-  LAOZHANG_IMAGE_MODEL_PRO,
+  laoZhangImageFailureUserHint,
   laoZhangImageToImage,
+  resolveLaoZhangImageModelFromBanana,
   type ImageSize,
-  type LaoZhangImageModelId,
 } from "@/lib/ai/AIService";
 import {
   getInitToneLockInstruction,
@@ -26,6 +25,8 @@ import {
   userWantsWomensRingOnModelPresentation,
 } from "@/lib/ai/jewelrySoftLimits";
 import { requireApiActiveUser } from "@/lib/apiAuth";
+import { resolveLaoZhangApiKeyFromRequest } from "@/lib/apiLaoZhangKey";
+import { getDesktopDbMode } from "@/lib/desktop/desktopDbMode";
 import { isDesktopBundledClientRequest } from "@/lib/runtime/desktopLocalMode";
 import { persistGeneratedImage } from "@/lib/images/persistGeneratedImage";
 import { ensureOwnedTaskId } from "@/lib/tasks/resolveTask";
@@ -114,6 +115,8 @@ type Body = {
   top?: boolean;
   /** Step3??? Banana pro?Pro?? Banana 2?Flash? */
   bananaImageModel?: "banana-pro" | "banana-2";
+  /** 与 x-laozhang-api-key 二选一；桌面内嵌时优先用 body */
+  laozhangApiKey?: string;
 };
 
 function makeGalleryImage({
@@ -143,8 +146,13 @@ export async function POST(req: Request) {
   const authz = await requireApiActiveUser(req);
   if (!authz.ok) return authz.response;
 
+  const desktopBundled = isDesktopBundledClientRequest(req);
   const desktopUpsert =
-    authz.authSource === "desktop-runtime" && isDesktopBundledClientRequest(req);
+    desktopBundled &&
+    (authz.authSource === "desktop-runtime" || authz.authSource === "desktop-ephemeral");
+  const persistLocal =
+    desktopBundled &&
+    (authz.authSource === "desktop-ephemeral" || getDesktopDbMode() === "off");
 
   try {
   const body = (await req.json().catch(() => ({}))) as Partial<Body>;
@@ -164,8 +172,7 @@ export async function POST(req: Request) {
 
   const bananaRaw =
     typeof body.bananaImageModel === "string" ? body.bananaImageModel.trim() : "";
-  const laoZhangImageModel: LaoZhangImageModelId =
-    bananaRaw === "banana-2" ? LAOZHANG_IMAGE_MODEL_FLASH : LAOZHANG_IMAGE_MODEL_PRO;
+  const laoZhangImageModel = resolveLaoZhangImageModelFromBanana(bananaRaw);
 
   // Step3 ?????????????? img2img ???????????????
   // Step3 以「保持 SKU 与主图影调」为第一目标：降低随机度，减少发灰重打光与左右串位。
@@ -188,6 +195,8 @@ export async function POST(req: Request) {
       ? selectedMainImageUrl
       : new URL(selectedMainImageUrl, req.url).toString();
 
+    const laozhangApiKey = resolveLaoZhangApiKeyFromRequest(req, body.laozhangApiKey);
+
     const images: GalleryImage[] = [];
     const runNonce = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
@@ -208,12 +217,14 @@ export async function POST(req: Request) {
       imageSize,
       sampling,
       laoZhangImageModel,
+      laozhangApiKey,
     };
     const sharedImgArgsLeftRight = {
       aspectRatio,
       imageSize,
       sampling: samplingLeftRight ?? sampling,
       laoZhangImageModel,
+      laozhangApiKey,
     };
 
     const kind = inferJewelryProductKind(prompt);
@@ -409,6 +420,7 @@ export async function POST(req: Request) {
           sourceMainImageId: selectedMainImageId,
           debugPromptZh,
           keyPrefix: `users/${authz.user.id}/step3/on_model`,
+          localMode: persistLocal,
         });
         return makeGalleryImage({
           id: persisted.id,
@@ -462,6 +474,7 @@ export async function POST(req: Request) {
           sourceMainImageId: selectedMainImageId,
           debugPromptZh,
           keyPrefix: `users/${authz.user.id}/step3/left`,
+          localMode: persistLocal,
         });
         return makeGalleryImage({
           id: persisted.id,
@@ -515,6 +528,7 @@ export async function POST(req: Request) {
           sourceMainImageId: selectedMainImageId,
           debugPromptZh,
           keyPrefix: `users/${authz.user.id}/step3/right`,
+          localMode: persistLocal,
         });
         return makeGalleryImage({
           id: persisted.id,
@@ -573,6 +587,7 @@ export async function POST(req: Request) {
           sourceMainImageId: selectedMainImageId,
           debugPromptZh,
           keyPrefix: `users/${authz.user.id}/step3/rear`,
+          localMode: persistLocal,
         });
         return makeGalleryImage({
           id: persisted.id,
@@ -625,6 +640,7 @@ export async function POST(req: Request) {
           sourceMainImageId: selectedMainImageId,
           debugPromptZh,
           keyPrefix: `users/${authz.user.id}/step3/front`,
+          localMode: persistLocal,
         });
         return makeGalleryImage({
           id: persisted.id,
@@ -647,7 +663,8 @@ export async function POST(req: Request) {
           : typeof e === "string" && e.trim()
             ? e
             : "????";
-    return NextResponse.json({ message }, { status: 500 });
+    const hint = laoZhangImageFailureUserHint(message);
+    return NextResponse.json({ message, hint }, { status: 500 });
   }
 }
 

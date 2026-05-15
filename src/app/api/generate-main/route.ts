@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 
 import {
-  LAOZHANG_IMAGE_MODEL_FLASH,
-  LAOZHANG_IMAGE_MODEL_PRO,
+  laoZhangImageFailureUserHint,
   laoZhangImagesToImage,
   laoZhangTextToImage,
+  resolveLaoZhangImageModelFromBanana,
   type ImageSize,
-  type LaoZhangImageModelId,
 } from "@/lib/ai/AIService";
 import {
   expandStep1PromptWithAi,
@@ -33,6 +32,7 @@ import {
   userExplicitEnvironmentOrSurfaceInPrompt,
 } from "@/lib/ai/jewelrySoftLimits";
 import { requireApiActiveUser } from "@/lib/apiAuth";
+import { resolveLaoZhangApiKeyFromRequest } from "@/lib/apiLaoZhangKey";
 import { isDesktopBundledClientRequest } from "@/lib/runtime/desktopLocalMode";
 import { persistGeneratedImage } from "@/lib/images/persistGeneratedImage";
 import { buildCappyCalmCharacterLockBlock } from "@/lib/ip/cappyCalm";
@@ -59,6 +59,8 @@ type Body = {
   step1ImageModel?: "banana-pro" | "banana-2";
   /** 客户端已成功注入 Cappy Calm 官方参考图时附带，用于追加角色锁定文案 */
   cappyCalmLockPreset?: "s925" | "goldPlated" | "brass";
+  /** 与 x-laozhang-api-key 二选一；桌面内嵌时优先用 body 更稳 */
+  laozhangApiKey?: string;
 };
 
 const MAX_REFERENCE_DATA_URL_CHARS = 14 * 1024 * 1024;
@@ -114,8 +116,7 @@ export async function POST(req: Request) {
       : typeof body.step1ImageModel === "string"
         ? body.step1ImageModel.trim()
         : "";
-  const laoZhangImageModel: LaoZhangImageModelId =
-    bananaRaw === "banana-2" ? LAOZHANG_IMAGE_MODEL_FLASH : LAOZHANG_IMAGE_MODEL_PRO;
+  const laoZhangImageModel = resolveLaoZhangImageModelFromBanana(bananaRaw);
 
   if (!prompt.trim()) {
     return NextResponse.json({ message: "?? prompt" }, { status: 400 });
@@ -129,6 +130,8 @@ export async function POST(req: Request) {
   if (!taskId) {
     return NextResponse.json({ message: "?? taskId" }, { status: 400 });
   }
+
+  const laozhangApiKey = resolveLaoZhangApiKeyFromRequest(req, body.laozhangApiKey);
 
   // nano-banana-pro ????????????????????????/???
   const sampling =
@@ -323,6 +326,7 @@ export async function POST(req: Request) {
               imageSize,
               sampling,
               laoZhangImageModel,
+              laozhangApiKey,
             })
           : laoZhangTextToImage({
               prompt: e.promptForThis,
@@ -330,6 +334,7 @@ export async function POST(req: Request) {
               imageSize,
               sampling,
               laoZhangImageModel,
+              laozhangApiKey,
             })
       )
     );
@@ -371,7 +376,8 @@ export async function POST(req: Request) {
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "????";
-    return NextResponse.json({ message }, { status: 500 });
+    const hint = laoZhangImageFailureUserHint(message);
+    return NextResponse.json({ message, hint }, { status: 500 });
   }
 }
 

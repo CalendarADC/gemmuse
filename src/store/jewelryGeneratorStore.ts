@@ -96,7 +96,14 @@ function writeScopedLaozhangApiKey(v: string): void {
 
 type ApiError = {
   message?: string;
+  hint?: string;
 };
+
+function formatApiErrorMessage(data: ApiError | null, fallback: string): string {
+  const msg = data?.message?.trim() || fallback;
+  const hint = data?.hint?.trim();
+  return hint ? `${msg}\n${hint}` : msg;
+}
 
 function shouldSyncServerTasks(): boolean {
   if (isDesktopLocalClientMode()) return false;
@@ -213,7 +220,8 @@ function buildSingleShotPlans(args: {
   return plans;
 }
 
-const STEP1_TIMEOUT_BASE_MS = 180_000;
+/** 含老张 NO_IMAGE 自动重试时，单次 Step1 请求可能持续数分钟 */
+const STEP1_TIMEOUT_BASE_MS = 360_000;
 const STEP1_TIMEOUT_PER_IMAGE_MS = 120_000;
 const ENHANCE_TIMEOUT_BASE_MS = 180_000;
 const ENHANCE_TIMEOUT_PER_SHOT_MS = 120_000;
@@ -1290,6 +1298,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               bananaImageModel: step1BananaImageModel,
               fastMode: step1FastMode,
               expansionStrength: step1ExpansionStrength,
+              laozhangApiKey: effectiveLaozhangApiKey,
               ...(referenceImageDataUrls.length ? { referenceImageDataUrls } : {}),
               ...(cappyCalmLockPreset ? { cappyCalmLockPreset } : {}),
             }),
@@ -1297,7 +1306,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
 
           if (!res.ok) {
             const data = (await res.json().catch(() => null)) as ApiError | null;
-            throw new Error(data?.message || `生成失败（HTTP ${res.status}）`);
+            throw new Error(formatApiErrorMessage(data, `生成失败（HTTP ${res.status}）`));
           }
 
           const data = (await res.json()) as {
@@ -1496,6 +1505,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
               bananaImageModel: step2BananaImageModel,
               fastMode: step1FastMode,
               expansionStrength: step1ExpansionStrength,
+              laozhangApiKey: effectiveLaozhangApiKey,
               ...(referenceImageDataUrls.length ? { referenceImageDataUrls } : {}),
               ...(cappyCalmLockPreset ? { cappyCalmLockPreset } : {}),
             }),
@@ -1688,6 +1698,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
                   prompt,
                   fastMode: step2FastMode,
                   bananaImageModel: step2BananaImageModel,
+                  laozhangApiKey: effectiveLaozhangApiKey,
                   selectedMainImageId: item.id,
                   selectedMainImageUrl,
                   onModel: plan.onModel,
@@ -1842,6 +1853,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
                 bananaImageModel: step2BananaImageModel,
                 fastMode: step1FastMode,
                 expansionStrength: step1ExpansionStrength,
+                laozhangApiKey: effectiveLaozhangApiKey,
                 ...(referenceImageDataUrls.length ? { referenceImageDataUrls } : {}),
                 ...(cappyCalmLockPreset ? { cappyCalmLockPreset } : {}),
               }),
@@ -1898,6 +1910,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
                     prompt,
                     fastMode: step2FastMode,
                     bananaImageModel: step2BananaImageModel,
+                    laozhangApiKey: effectiveLaozhangApiKey,
                     selectedMainImageId: sourceMainImageId,
                     selectedMainImageUrl,
                     onModel: plan.onModel,
@@ -1960,6 +1973,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
                 prompt,
                 fastMode: step2FastMode,
                 bananaImageModel: step2BananaImageModel,
+                laozhangApiKey: effectiveLaozhangApiKey,
                 selectedMainImageId: sourceMainImageId,
                 selectedMainImageUrl,
                 onModel,

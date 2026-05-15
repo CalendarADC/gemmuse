@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, shell } from "electron";
 import { config as loadDotenvFile } from "dotenv";
-import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import os from "node:os";
@@ -46,16 +46,69 @@ function loadPackagedDesktopEnv(): void {
   }
 }
 
+/**
+ * NextAuth 在生产环境要求 secret；安装包常未带 .env，则在 userData 生成并复用同一密钥。
+ */
+function ensureDesktopNextAuthSecret(): void {
+  if (!app.isPackaged) return;
+  if (process.env.NEXTAUTH_SECRET?.trim()) {
+    if (!process.env.AUTH_SECRET?.trim()) {
+      process.env.AUTH_SECRET = process.env.NEXTAUTH_SECRET;
+    }
+    return;
+  }
+  if (process.env.AUTH_SECRET?.trim()) {
+    process.env.NEXTAUTH_SECRET = process.env.AUTH_SECRET;
+    return;
+  }
+  const secretPath = join(app.getPath("userData"), "nextauth-secret.txt");
+  try {
+    if (existsSync(secretPath)) {
+      const existing = readFileSync(secretPath, "utf8").trim();
+      if (existing.length >= 16) {
+        process.env.NEXTAUTH_SECRET = existing;
+        process.env.AUTH_SECRET = existing;
+        return;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  const created = randomBytes(32).toString("base64url");
+  try {
+    writeFileSync(secretPath, created, "utf8");
+  } catch {
+    /* 仍设置进程内变量；若写盘失败，重启后会重新生成 */
+  }
+  process.env.NEXTAUTH_SECRET = created;
+  process.env.AUTH_SECRET = created;
+}
+
 /** 内置 Next 与浏览器访问同源；避免沿用线上 NEXTAUTH_URL 导致 cookie/回调异常。 */
 function applyDesktopRuntimeDefaults(): void {
   if (!app.isPackaged) return;
+  ensureDesktopNextAuthSecret();
   process.env.NEXTAUTH_URL = NEXT_URL;
   if (!process.env.DESKTOP_LOCAL_IMAGE_STORAGE?.trim()) {
     process.env.DESKTOP_LOCAL_IMAGE_STORAGE = "1";
   }
-  if (!process.env.NEXTAUTH_SECRET?.trim() && process.env.AUTH_SECRET?.trim()) {
-    process.env.NEXTAUTH_SECRET = process.env.AUTH_SECRET;
+  /** 安装包默认不连远程数据库；exe 旁 .env 可显式设为 auto/on 覆盖。 */
+  if (!process.env.DESKTOP_DB_MODE?.trim()) {
+    process.env.DESKTOP_DB_MODE = "off";
   }
+}
+
+/** 打包版默认把生图 PNG 落在 userData，供 Next 内 `/api/local-media` 读取。 */
+function ensureGemmuseLocalMediaDir(): void {
+  if (!app.isPackaged) return;
+  const dir =
+    process.env.GEMMUSE_LOCAL_MEDIA_DIR?.trim() || join(app.getPath("userData"), "local-media");
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    /* ignore */
+  }
+  process.env.GEMMUSE_LOCAL_MEDIA_DIR = dir;
 }
 
 function nextServerLogPath(): string {
@@ -151,18 +204,18 @@ function showPackagedStartingWindow() {
   if (!shouldRunEmbeddedNextFromMain()) return;
   if (startingWindow) return;
   const w = new BrowserWindow({
-    width: 420,
-    height: 140,
+    width: 440,
+    height: 420,
     show: true,
     resizable: false,
     minimizable: false,
     maximizable: false,
     autoHideMenuBar: true,
-    title: "GemMuse 2.0",
+    title: "GemMuse 2.2",
     webPreferences: { sandbox: true },
   });
   const html =
-    "<!DOCTYPE html><meta charset=utf-8><style>body{font:14px system-ui;margin:0;padding:28px;text-align:center;color:#333}</style><body>正在启动本地服务，请稍候…</body>";
+    "<!DOCTYPE html><meta charset=utf-8><style>body{font:14px system-ui;margin:0;padding:28px;text-align:center;color:#333}</style><body>正在启动内置服务，请稍候…</body>";
   void w.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
   startingWindow = w;
 }
@@ -237,7 +290,7 @@ function createWindow() {
   const preloadPath = join(__dirname, "preload.js");
   const deviceInfo = buildDeviceInfo();
   const win = new BrowserWindow({
-    title: "GemMuse 2.0",
+    title: "GemMuse 2.2",
     width: 1480,
     height: 940,
     minWidth: 1180,
@@ -271,7 +324,7 @@ function createWindow() {
     if (url.startsWith(NEXT_URL)) {
       void dialog.showMessageBox(win, {
         type: "error",
-        title: "GemMuse 2.0",
+        title: "GemMuse 2.2",
         message: "页面加载失败",
         detail: `${desc}（错误码 ${code}）\n地址：${url}\n请确认本机未占用端口 ${DEFAULT_PORT}，且 .env 中数据库等配置正确。`,
       });
@@ -284,11 +337,12 @@ function createWindow() {
 void app.whenReady().then(async () => {
   loadPackagedDesktopEnv();
   applyDesktopRuntimeDefaults();
+  ensureGemmuseLocalMediaDir();
   showPackagedStartingWindow();
   startBundledNextServer();
   if (nextProcess) {
     nextProcess.once("error", (err) => {
-      void dialog.showErrorBox("GemMuse 2.0", `无法启动内置服务：${String(err?.message ?? err)}`);
+      void dialog.showErrorBox("GemMuse 2.2", `无法启动内置服务：${String(err?.message ?? err)}`);
     });
     nextProcess.once("exit", (code, signal) => {
       if (suppressNextExitDialog) return;
@@ -297,7 +351,7 @@ void app.whenReady().then(async () => {
       nextChildExitedAbnormally = true;
       const tail = readNextServerLogTail();
       void dialog.showErrorBox(
-        "GemMuse 2.0",
+        "GemMuse 2.2",
         `内置服务已退出（代码 ${String(code)}${signal ? `，信号 ${signal}` : ""}）。\n` +
           `配置：exe 同目录 .env / .env.example，或 ${join(app.getPath("userData"), ".env")}\n` +
           `日志：${nextServerLogPath()}\n\n` +
@@ -307,11 +361,19 @@ void app.whenReady().then(async () => {
   }
   if (shouldRunEmbeddedNextFromMain()) {
     const ok = await waitForBundledNextReady();
+    if (ok && startingWindow) {
+      try {
+        await startingWindow.loadURL(`${NEXT_URL}/desktop-startup`);
+        await new Promise((r) => setTimeout(r, 2600));
+      } catch {
+        /* 自检页加载失败时仍继续进入主窗 */
+      }
+    }
     closeStartingWindow();
     if (!ok && !nextChildExitedAbnormally) {
       const tail = readNextServerLogTail();
       void dialog.showErrorBox(
-        "GemMuse 2.0",
+        "GemMuse 2.2",
         `本地服务在约 2 分钟内未就绪：${NEXT_URL}\n` +
           `请检查端口 ${DEFAULT_PORT}、数据库与 .env。完整日志见：${nextServerLogPath()}\n\n` +
           (tail ? tail : "")

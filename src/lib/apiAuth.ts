@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 
 import { getAuthSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getDesktopDbMode } from "@/lib/desktop/desktopDbMode";
 import { isDesktopBundledClientRequest } from "@/lib/runtime/desktopLocalMode";
 
 function isPrismaPoolBusyError(error: unknown): boolean {
@@ -90,6 +91,10 @@ export async function requireApiActiveUser(req: Request): Promise<RequireApiActi
   }
 
   if (isDesktopBundledClientRequest(req)) {
+    const dbMode = getDesktopDbMode();
+    if (dbMode === "off") {
+      return { ok: true as const, user: desktopEphemeralUser(), authSource: "desktop-ephemeral" };
+    }
     try {
       const user = await getOrCreateDesktopRuntimeUser();
       if (user.status !== "ACTIVE") {
@@ -101,7 +106,18 @@ export async function requireApiActiveUser(req: Request): Promise<RequireApiActi
       return { ok: true as const, user, authSource: "desktop-runtime" };
     } catch (e) {
       console.error("[requireApiActiveUser] desktop-runtime user:", e);
-      // 数据库短时不可用时，桌面模式降级为本地临时账号，避免阻断扩写/生图流程。
+      if (dbMode === "on") {
+        return {
+          ok: false as const,
+          response: NextResponse.json(
+            {
+              message:
+                "桌面模式已启用 DESKTOP_DB_MODE=on，但当前无法连接数据库。请检查 DATABASE_URL 与网络。",
+            },
+            { status: 503 },
+          ),
+        };
+      }
       return { ok: true as const, user: desktopEphemeralUser(), authSource: "desktop-ephemeral" };
     }
   }

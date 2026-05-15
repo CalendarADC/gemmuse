@@ -1,3 +1,7 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { join, relative, resolve } from "node:path";
+
 import { toDataPng } from "@/lib/ai/AIService";
 import { runSerializedPersist } from "@/lib/db/persistWriteQueue";
 import { prisma } from "@/lib/db";
@@ -24,6 +28,48 @@ function isTransientPrismaPersistError(error: unknown): boolean {
   );
 }
 
+function sanitizeSegment(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 120) || "x";
+}
+
+function keyPrefixToSegments(keyPrefix: string): string[] {
+  return keyPrefix
+    .split("/")
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map(sanitizeSegment);
+}
+
+/** 将 PNG 写入 GEMMUSE_LOCAL_MEDIA_DIR，返回同源可嵌入的 `/api/local-media/...` URL。 */
+function persistPngToLocalMedia(args: {
+  userId: string;
+  keyPrefix: string;
+  base64: string;
+}): { id: string; url: string } {
+  const root = process.env.GEMMUSE_LOCAL_MEDIA_DIR?.trim();
+  if (!root) {
+    return {
+      id: `local_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      url: toDataPng(args.base64),
+    };
+  }
+  const id = `local_${Date.now()}_${randomBytes(8).toString("hex")}`;
+  const userSeg = sanitizeSegment(args.userId);
+  const sub = ["generated", userSeg, ...keyPrefixToSegments(args.keyPrefix)];
+  const rootResolved = resolve(root);
+  const absDir = resolve(rootResolved, ...sub);
+  const relToRoot = relative(rootResolved, absDir);
+  if (relToRoot.startsWith("..") || relToRoot === "") {
+    throw new Error("persistPngToLocalMedia: path escaped media root");
+  }
+  mkdirSync(absDir, { recursive: true });
+  const fileName = `${randomBytes(16).toString("hex")}.png`;
+  const absFile = join(absDir, fileName);
+  writeFileSync(absFile, Buffer.from(args.base64, "base64"));
+  const urlPath = [...sub, fileName].map(encodeURIComponent).join("/");
+  return { id, url: `/api/local-media/${urlPath}` };
+}
+
 export async function persistGeneratedImage(args: {
   userId: string;
   taskId?: string;
@@ -35,10 +81,11 @@ export async function persistGeneratedImage(args: {
   localMode?: boolean;
 }): Promise<{ id: string; url: string; objectKey?: string }> {
   if (args.localMode) {
-    return {
-      id: `local_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-      url: toDataPng(args.base64),
-    };
+    return persistPngToLocalMedia({
+      userId: args.userId,
+      keyPrefix: args.keyPrefix,
+      base64: args.base64,
+    });
   }
   const objectKey = `${args.keyPrefix}/${Date.now()}_${Math.random().toString(16).slice(2)}.png`;
   const uploaded = await uploadPngBase64ToObjectStorage({

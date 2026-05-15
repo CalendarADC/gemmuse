@@ -7,6 +7,7 @@ import AppToastHost from "./AppToastHost";
 import TaskSidebar from "./TaskSidebar";
 import CreateStepNav from "./CreateStepNav";
 import ApiKeyPillButton from "./ApiKeyPillButton";
+import DesktopRuntimeBanner from "./DesktopRuntimeBanner";
 import { useJewelryGeneratorStore } from "@/store/jewelryGeneratorStore";
 
 export default function CreateWorkspaceLayout({
@@ -69,6 +70,7 @@ export default function CreateWorkspaceLayout({
           <div className="relative z-0 mx-auto min-h-0 w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
             <DragScrollAssist />
             <AppToastHost />
+            <DesktopRuntimeBanner />
             {children}
           </div>
         </div>

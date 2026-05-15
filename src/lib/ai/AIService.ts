@@ -18,23 +18,25 @@ export type LaoZhangSampling = {
   topP?: number;
 };
 
+type LaoZhangPart = {
+  inlineData?: { data?: string; mimeType?: string; mime_type?: string };
+  inline_data?: { data?: string; mime_type?: string };
+  fileData?: { data?: string; mimeType?: string };
+  file_data?: { data?: string; mime_type?: string };
+  text?: string;
+};
+
 type LaoZhangGenerateResponse = {
   candidates?: Array<{
     finishReason?: string;
+    finish_reason?: string;
     content?: {
-      parts?: Array<{
-        inlineData?: {
-          data?: string;
-        };
-        inline_data?: {
-          data?: string;
-        };
-        text?: string;
-      }>;
+      parts?: LaoZhangPart[];
     };
   }>;
   promptFeedback?: {
     blockReason?: string;
+    block_reason?: string;
   };
 };
 
@@ -50,6 +52,28 @@ export type LaoZhangImageModelId =
   | typeof LAOZHANG_IMAGE_MODEL_FLASH
   | typeof LAOZHANG_IMAGE_MODEL_GPT_IMAGE_2;
 
+export function resolveLaoZhangImageModelFromBanana(bananaRaw: string): LaoZhangImageModelId {
+  const v = bananaRaw.trim();
+  if (v === "banana-2") return LAOZHANG_IMAGE_MODEL_FLASH;
+  if (v === "gpt-image-2") return LAOZHANG_IMAGE_MODEL_GPT_IMAGE_2;
+  return LAOZHANG_IMAGE_MODEL_PRO;
+}
+
+/** Step1/2 生图失败时追加给用户的简短说明（原始错误信息仍保留在 message 中） */
+export function laoZhangImageFailureUserHint(detail: string): string {
+  const d = detail.toLowerCase();
+  if (d.includes("no_image") || d.includes("未找到图片 base64")) {
+    return "上游本次未返回图片（NO_IMAGE），常见于高峰或 4K/强扩写。已自动重试仍失败时请：隔几分钟再试、改用 Banana 2、或先开「极速」生成 2K；若带参考图可暂时减少参考图张数。";
+  }
+  if (d.includes("429") || d.includes("饱和") || d.includes("限流")) {
+    return "上游繁忙或限流，请稍后再试，或减少 Step1 同时生成张数。";
+  }
+  if (d.includes("缺少老张") || d.includes("api key")) {
+    return "请在 Step1 顶部填写老张 API Key，或在 .env 中配置 LAOZHANG_API_KEY。";
+  }
+  return "若持续失败，请检查老张 API Key、套餐额度，或稍后重试。";
+}
+
 export function laoZhangImageGenerateUrl(modelId: LaoZhangImageModelId): string {
   if (modelId === LAOZHANG_IMAGE_MODEL_GPT_IMAGE_2) {
     return `${LAOZHANG_OPENAI_BASE}/chat/completions`;
@@ -57,14 +81,17 @@ export function laoZhangImageGenerateUrl(modelId: LaoZhangImageModelId): string 
   return `${LAOZHANG_IMAGE_API_ORIGIN}/v1beta/models/${modelId}:generateContent`;
 }
 
-/** 429/502/503 时指数退避；饱和类错误略加长等待，总时长可能到数分钟 */
-const LAOZHANG_IMAGE_MAX_ATTEMPTS = (() => {
-  const raw = process.env.LAOZHANG_IMAGE_MAX_ATTEMPTS?.trim();
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  // 官方最小透传默认：单次直连，不做客户端重试；仅在显式配置时才开启重试。
   if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  return 1;
-})();
+  return fallback;
+}
+
+/** 429/502/503 时指数退避；默认 1 次（不重试 HTTP），可用 LAOZHANG_IMAGE_MAX_ATTEMPTS 调大 */
+const LAOZHANG_IMAGE_MAX_ATTEMPTS = readPositiveIntEnv("LAOZHANG_IMAGE_MAX_ATTEMPTS", 1);
+/** finishReason=NO_IMAGE 时单独重试（与 HTTP 重试计数分离），默认 4 次 */
+const LAOZHANG_NO_IMAGE_MAX_ATTEMPTS = readPositiveIntEnv("LAOZHANG_NO_IMAGE_MAX_ATTEMPTS", 4);
 const LAOZHANG_RETRY_BASE_MS = 3_500;
 /** 单次上游生图请求最大等待时长（避免 fetch 无限挂起） */
 const LAOZHANG_HTTP_TIMEOUT_MS = 300_000;
@@ -126,31 +153,64 @@ function parseLaoZhangErrorDetail(status: number, bodyText: string): string {
   return trimmed ? trimmed.slice(0, 800) : "(无响应正文)";
 }
 
+function base64FromLaoZhangPart(p: LaoZhangPart | undefined): string | null {
+  if (!p) return null;
+  const fromInline =
+    p.inlineData?.data?.trim() ||
+    p.inline_data?.data?.trim() ||
+    p.fileData?.data?.trim() ||
+    p.file_data?.data?.trim();
+  if (fromInline) return fromInline;
+  const t = p.text?.trim();
+  if (!t) return null;
+  if (t.startsWith("data:image/")) {
+    const m = /^data:[^;]+;base64,([\s\S]*)$/.exec(t);
+    if (m?.[1]) return m[1];
+  }
+  // 少数代理把整段 base64 放在 text 里（无 data URL 前缀）
+  if (/^[A-Za-z0-9+/=\s]+$/.test(t) && t.replace(/\s/g, "").length > 256) {
+    return t.replace(/\s/g, "");
+  }
+  return null;
+}
+
 function extractImageBase64FromGenerateResponse(json: LaoZhangGenerateResponse): string | null {
   const candidates = Array.isArray(json?.candidates) ? json.candidates : [];
   for (const c of candidates) {
     const parts = Array.isArray(c?.content?.parts) ? c.content.parts : [];
     for (const p of parts) {
-      const b64a = p?.inlineData?.data?.trim();
-      if (b64a) return b64a;
-      const b64b = p?.inline_data?.data?.trim();
-      if (b64b) return b64b;
-      const t = p?.text?.trim();
-      if (t && t.startsWith("data:image/")) {
-        const m = /^data:[^;]+;base64,(.*)$/.exec(t);
-        if (m?.[1]) return m[1];
-      }
+      const b64 = base64FromLaoZhangPart(p);
+      if (b64) return b64;
     }
   }
   return null;
 }
 
+function clonePayloadWithoutSampling(payload: object): object {
+  const cloned = JSON.parse(JSON.stringify(payload)) as {
+    generationConfig?: Record<string, unknown>;
+  };
+  const gc = cloned.generationConfig;
+  if (gc) {
+    delete gc.temperature;
+    delete gc.topP;
+    delete gc.top_p;
+  }
+  return cloned;
+}
+
+function noImageRetryWaitMs(noImageAttempt: number): number {
+  const jitter = 0.85 + Math.random() * 0.3;
+  return Math.floor(Math.min(25_000, 2_000 + noImageAttempt * 1_500) * jitter);
+}
+
 function buildNoImageDetail(json: LaoZhangGenerateResponse): string {
   const reasons: string[] = [];
-  const blockReason = json?.promptFeedback?.blockReason;
+  const blockReason =
+    json?.promptFeedback?.blockReason?.trim() || json?.promptFeedback?.block_reason?.trim();
   if (blockReason) reasons.push(`blockReason=${blockReason}`);
   const finishReasons = (json?.candidates ?? [])
-    .map((c) => c?.finishReason)
+    .map((c) => c?.finishReason?.trim() || c?.finish_reason?.trim())
     .filter((x): x is string => !!x);
   if (finishReasons.length) reasons.push(`finishReason=${finishReasons.join(",")}`);
   return reasons.length ? `（${reasons.join("；")}）` : "";
@@ -158,7 +218,18 @@ function buildNoImageDetail(json: LaoZhangGenerateResponse): string {
 
 function hasNoImageFinishReason(json: LaoZhangGenerateResponse): boolean {
   const candidates = Array.isArray(json?.candidates) ? json.candidates : [];
-  return candidates.some((c) => (c?.finishReason || "").toUpperCase() === "NO_IMAGE");
+  return candidates.some((c) => {
+    const r = (c?.finishReason || c?.finish_reason || "").toUpperCase();
+    return r === "NO_IMAGE";
+  });
+}
+
+function shouldRetryEmptyImageResponse(json: LaoZhangGenerateResponse): boolean {
+  if (extractImageBase64FromGenerateResponse(json)) return false;
+  if (hasNoImageFinishReason(json)) return true;
+  // HTTP 200 但无任何 inline 图：按空结果重试（上游偶发只回文本 part）
+  const candidates = Array.isArray(json?.candidates) ? json.candidates : [];
+  return candidates.length > 0;
 }
 
 function extractFirstImageUrlFromMarkdown(text: string): string | null {
@@ -256,7 +327,8 @@ async function postLaoZhangOpenAiImageByChat(
 }
 
 /**
- * 调用老张图像 generateContent，对 429/502/503 做指数退避重试。
+ * 调用老张图像 generateContent：HTTP 429/502/503 与 LAOZHANG_IMAGE_MAX_ATTEMPTS 对齐；
+ * 200 但无图（含 finishReason=NO_IMAGE）单独按 LAOZHANG_NO_IMAGE_MAX_ATTEMPTS 重试，与前者解耦。
  */
 async function postLaoZhangImageGenerate(
   payload: object,
@@ -268,188 +340,150 @@ async function postLaoZhangImageGenerate(
   const prefix = operation === "generate" ? "老张图像生成失败" : "老张图像编辑失败";
   const url = laoZhangImageGenerateUrl(modelId);
 
-  let lastStatus = 0;
-  let lastBody = "";
-  let didSamplingFallback = false;
-  let lastNetworkError: unknown = null;
+  let lastEmptyJson: LaoZhangGenerateResponse | null = null;
+  let sawHttpOkWithoutImage = false;
 
-  for (let attempt = 0; attempt < LAOZHANG_IMAGE_MAX_ATTEMPTS; attempt++) {
-    let res: Response;
-    try {
-      res = await fetchWithTimeout(
-        url,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
+  for (let noImageAttempt = 0; noImageAttempt < LAOZHANG_NO_IMAGE_MAX_ATTEMPTS; noImageAttempt++) {
+    let lastStatus = 0;
+    let lastBody = "";
+    let didSamplingFallback = false;
+    let lastNetworkError: unknown = null;
+    let bodyToSend: object =
+      noImageAttempt > 0 ? clonePayloadWithoutSampling(payload) : payload;
+
+    for (let attempt = 0; attempt < LAOZHANG_IMAGE_MAX_ATTEMPTS; attempt++) {
+      let res: Response;
+      try {
+        res = await fetchWithTimeout(
+          url,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(bodyToSend),
           },
-          body: JSON.stringify(payload),
-        },
-        LAOZHANG_HTTP_TIMEOUT_MS
-      );
-      lastNetworkError = null;
-    } catch (error) {
-      lastNetworkError = error;
-      const hasMoreAttempts = attempt < LAOZHANG_IMAGE_MAX_ATTEMPTS - 1;
-      if (hasMoreAttempts) {
-        const waitMs = Math.min(90_000, LAOZHANG_RETRY_BASE_MS * Math.pow(2, attempt));
-        await sleep(waitMs);
-        continue;
-      }
-      const detail =
-        error instanceof Error
-          ? isAbortLikeError(error)
-            ? "上游接口响应超时（网络拥堵或服务繁忙）"
-            : error.message
-          : "请求上游接口失败";
-      throw new Error(`${prefix}：${detail}`);
-    }
-
-    if (res.ok) {
-      const json = (await res.json().catch(() => ({}))) as LaoZhangGenerateResponse;
-      const base64 = extractImageBase64FromGenerateResponse(json);
-      if (!base64) {
-        const noImage = hasNoImageFinishReason(json);
+          LAOZHANG_HTTP_TIMEOUT_MS
+        );
+        lastNetworkError = null;
+      } catch (error) {
+        lastNetworkError = error;
         const hasMoreAttempts = attempt < LAOZHANG_IMAGE_MAX_ATTEMPTS - 1;
-        if (noImage && hasMoreAttempts) {
-          const waitMs = Math.min(25_000, 2_000 + attempt * 1_500);
+        if (hasMoreAttempts) {
+          const waitMs = Math.min(90_000, LAOZHANG_RETRY_BASE_MS * Math.pow(2, attempt));
           await sleep(waitMs);
           continue;
         }
+        const detail =
+          error instanceof Error
+            ? isAbortLikeError(error)
+              ? "上游接口响应超时（网络拥堵或服务繁忙）"
+              : error.message
+            : "请求上游接口失败";
+        throw new Error(`${prefix}：${detail}`);
+      }
+
+      if (res.ok) {
+        const json = (await res.json().catch(() => ({}))) as LaoZhangGenerateResponse;
+        const base64 = extractImageBase64FromGenerateResponse(json);
+        if (base64) return base64;
+        sawHttpOkWithoutImage = true;
+        lastEmptyJson = json;
+        const canNoImageRetry = noImageAttempt < LAOZHANG_NO_IMAGE_MAX_ATTEMPTS - 1;
+        if (shouldRetryEmptyImageResponse(json) && canNoImageRetry) {
+          await sleep(noImageRetryWaitMs(noImageAttempt));
+          break;
+        }
         throw new Error(`老张返回结果中未找到图片 base64 数据${buildNoImageDetail(json)}。`);
       }
-      return base64;
-    }
 
-    lastStatus = res.status;
-    lastBody = await res.text().catch(() => "");
+      lastStatus = res.status;
+      lastBody = await res.text().catch(() => "");
 
-    const retryable = res.status === 429 || res.status === 503 || res.status === 502;
-    const hasMoreAttempts = attempt < LAOZHANG_IMAGE_MAX_ATTEMPTS - 1;
+      const retryable = res.status === 429 || res.status === 503 || res.status === 502;
+      const hasMoreAttempts = attempt < LAOZHANG_IMAGE_MAX_ATTEMPTS - 1;
 
-    // 若 generationConfig 不支持 temperature/topP（可能是 schema 不允许），做一次“去采样字段”回退。
-    const payloadAny = payload as any;
-    const hasSampling =
-      !!payloadAny?.generationConfig &&
-      (payloadAny.generationConfig.temperature !== undefined ||
-        payloadAny.generationConfig.topP !== undefined ||
-        payloadAny.generationConfig.top_p !== undefined);
+      const payloadAny = bodyToSend as {
+        generationConfig?: { temperature?: unknown; topP?: unknown; top_p?: unknown };
+      };
+      const hasSampling =
+        !!payloadAny?.generationConfig &&
+        (payloadAny.generationConfig.temperature !== undefined ||
+          payloadAny.generationConfig.topP !== undefined ||
+          payloadAny.generationConfig.top_p !== undefined);
 
-    if (
-      !retryable &&
-      hasSampling &&
-      !didSamplingFallback &&
-      (res.status === 400 || res.status === 422)
-    ) {
-      const bodyLower = lastBody.toLowerCase();
-      const looksLikeSamplingInvalid =
-        bodyLower.includes("temperature") || bodyLower.includes("topp") || bodyLower.includes("top_p");
-
-      if (looksLikeSamplingInvalid) {
-        didSamplingFallback = true;
-        const strippedPayload = JSON.parse(JSON.stringify(payload)) as any;
-        if (strippedPayload?.generationConfig) {
-          delete strippedPayload.generationConfig.temperature;
-          delete strippedPayload.generationConfig.topP;
-          delete strippedPayload.generationConfig.top_p;
-        }
-        let res2: Response;
-        try {
-          res2 = await fetchWithTimeout(
-            url,
-            {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(strippedPayload),
-            },
-            LAOZHANG_HTTP_TIMEOUT_MS
-          );
-        } catch (error) {
-          const hasMoreAttempts = attempt < LAOZHANG_IMAGE_MAX_ATTEMPTS - 1;
-          if (hasMoreAttempts) {
-            const waitMs = Math.min(90_000, LAOZHANG_RETRY_BASE_MS * Math.pow(2, attempt));
-            await sleep(waitMs);
-            continue;
-          }
-          const detail =
-            error instanceof Error
-              ? isAbortLikeError(error)
-                ? "上游接口响应超时（网络拥堵或服务繁忙）"
-                : error.message
-              : "请求上游接口失败";
-          throw new Error(`${prefix}：${detail}`);
-        }
-        if (res2.ok) {
-          const json2 = (await res2.json().catch(() => ({}))) as LaoZhangGenerateResponse;
-          const base64_2 = extractImageBase64FromGenerateResponse(json2);
-          if (!base64_2) {
-            const noImage2 = hasNoImageFinishReason(json2);
-            if (noImage2) {
-              // 回退请求若命中 NO_IMAGE，不立即终止，回到外层循环继续重试。
-              const waitMs = Math.min(25_000, 2_500 + attempt * 1_500);
-              await sleep(waitMs);
-              continue;
-            }
-            throw new Error(`老张返回结果中未找到图片 base64 数据${buildNoImageDetail(json2)}。`);
-          }
-          return base64_2;
-        }
-        // fallback 失败则继续按原逻辑抛出错误
-      }
-    }
-
-    if (!retryable || !hasMoreAttempts) {
-      const detail = parseLaoZhangErrorDetail(res.status, lastBody);
-      throw new Error(`${prefix}（HTTP ${res.status}）：${detail}`);
-    }
-
-    let waitMs = Math.min(180_000, LAOZHANG_RETRY_BASE_MS * Math.pow(2, attempt));
-    const ra = res.headers.get("retry-after");
-    if (ra) {
-      const sec = parseInt(ra, 10);
-      if (!Number.isNaN(sec) && sec > 0) {
-        waitMs = Math.min(180_000, sec * 1000);
-      }
-    }
-    // 上游明确报「负载饱和」时多等一会，提高重试成功率
-    if (res.status === 429) {
-      const b = lastBody.toLowerCase();
       if (
-        lastBody.includes("饱和") ||
-        lastBody.includes("负载") ||
-        b.includes("capacity") ||
-        b.includes("overload")
+        !retryable &&
+        hasSampling &&
+        !didSamplingFallback &&
+        (res.status === 400 || res.status === 422)
       ) {
-        waitMs = Math.min(180_000, Math.floor(waitMs * 1.85));
+        const bodyLower = lastBody.toLowerCase();
+        const looksLikeSamplingInvalid =
+          bodyLower.includes("temperature") || bodyLower.includes("topp") || bodyLower.includes("top_p");
+
+        if (looksLikeSamplingInvalid) {
+          didSamplingFallback = true;
+          bodyToSend = clonePayloadWithoutSampling(payload);
+          continue;
+        }
       }
+
+      if (!retryable || !hasMoreAttempts) {
+        const detail = parseLaoZhangErrorDetail(res.status, lastBody);
+        throw new Error(`${prefix}（HTTP ${res.status}）：${detail}`);
+      }
+
+      let waitMs = Math.min(180_000, LAOZHANG_RETRY_BASE_MS * Math.pow(2, attempt));
+      const ra = res.headers.get("retry-after");
+      if (ra) {
+        const sec = parseInt(ra, 10);
+        if (!Number.isNaN(sec) && sec > 0) {
+          waitMs = Math.min(180_000, sec * 1000);
+        }
+      }
+      if (res.status === 429) {
+        const b = lastBody.toLowerCase();
+        if (
+          lastBody.includes("饱和") ||
+          lastBody.includes("负载") ||
+          b.includes("capacity") ||
+          b.includes("overload")
+        ) {
+          waitMs = Math.min(180_000, Math.floor(waitMs * 1.85));
+        }
+      }
+      const jitter = 0.85 + Math.random() * 0.3;
+      await sleep(Math.floor(waitMs * jitter));
     }
-    // 增加少量随机抖动，避免所有请求同一时刻“踩点”重试
-    const jitter = 0.85 + Math.random() * 0.3;
-    await sleep(Math.floor(waitMs * jitter));
+
+    if (lastNetworkError) {
+      const detail =
+        lastNetworkError instanceof Error
+          ? isAbortLikeError(lastNetworkError)
+            ? "上游接口响应超时（网络拥堵或服务繁忙）"
+            : lastNetworkError.message
+          : "请求上游接口失败";
+      throw new Error(`${prefix}：${detail}`);
+    }
+    if (!sawHttpOkWithoutImage && lastStatus !== 0) {
+      const detail = parseLaoZhangErrorDetail(lastStatus, lastBody);
+      throw new Error(`${prefix}（HTTP ${lastStatus}）：${detail}`);
+    }
   }
 
-  if (lastNetworkError) {
-    const detail =
-      lastNetworkError instanceof Error
-        ? isAbortLikeError(lastNetworkError)
-          ? "上游接口响应超时（网络拥堵或服务繁忙）"
-          : lastNetworkError.message
-        : "请求上游接口失败";
-    throw new Error(`${prefix}：${detail}`);
+  if (lastEmptyJson) {
+    throw new Error(`老张返回结果中未找到图片 base64 数据${buildNoImageDetail(lastEmptyJson)}。`);
   }
-  const detail = parseLaoZhangErrorDetail(lastStatus, lastBody);
-  throw new Error(`${prefix}（HTTP ${lastStatus}）：${detail}`);
+  throw new Error(`${prefix}：未知错误（无响应）。`);
 }
 
 function requireLaoZhangApiKey(overrideKey?: string): string {
   const key = overrideKey?.trim() || process.env.LAOZHANG_API_KEY;
   if (!key) {
     throw new Error(
-      "缺少环境变量 LAOZHANG_API_KEY。请在项目根目录创建 .env.local 并填写你的老张 API Key（格式通常为 sk-xxxxx）。"
+      "缺少老张 API Key：请在 Step1 顶部填写密钥（会随请求提交），或在安装目录 / 项目根目录的 .env 中配置 LAOZHANG_API_KEY（格式通常为 sk-…）。",
     );
   }
   return key;
@@ -641,4 +675,14 @@ export async function laoZhangImageToImage(args: {
 
 export function toDataPng(base64: string) {
   return `data:image/png;base64,${base64}`;
+}
+
+/** @internal vitest */
+export function extractImageBase64FromGenerateResponseForTest(json: LaoZhangGenerateResponse) {
+  return extractImageBase64FromGenerateResponse(json);
+}
+
+/** @internal vitest */
+export function shouldRetryEmptyImageResponseForTest(json: LaoZhangGenerateResponse) {
+  return shouldRetryEmptyImageResponse(json);
 }
