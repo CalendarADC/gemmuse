@@ -36,16 +36,16 @@ const STEP1_MODEL_MENU_PANEL =
   "absolute left-0 top-full z-[35] mt-1.5 min-w-max max-w-[min(100vw-2rem,280px)] overflow-hidden rounded-xl border border-[rgba(94,111,130,0.18)] bg-[var(--create-surface-paper)] py-1 shadow-lg";
 
 const STYLE_OPTIONS = [
-  { id: "gothic", label: "哥特风", labelEn: "Gothic" },
-  { id: "celtic", label: "凯尔特 / 北欧", labelEn: "Celtic & Norse" },
-  { id: "artsCrafts", label: "工艺美术运动", labelEn: "Arts & Crafts" },
-  { id: "artNouveau", label: "新艺术", labelEn: "Art Nouveau" },
-  { id: "mementoMori", label: "维多利亚哀悼风", labelEn: "Memento Mori" },
-  { id: "steampunk", label: "蒸汽朋克", labelEn: "Steampunk" },
-  { id: "brutalist", label: "粗野主义", labelEn: "Brutalist" },
-  { id: "baroque", label: "巴洛克", labelEn: "Baroque" },
-  { id: "rococo", label: "洛可可", labelEn: "Rococo" },
-  { id: "byzantine", label: "拜占庭", labelEn: "Byzantine" },
+  { id: "gothic", label: "哥特风", labelEn: "Gothic", desc: "暗黑、尖拱、神秘、宗教、冷峻、骨感、戏剧张力" },
+  { id: "celtic", label: "凯尔特 / 北欧", labelEn: "Celtic & Norse", desc: "结纹、符文、自然、图腾、复古、原始力量、螺旋缠绕" },
+  { id: "artsCrafts", label: "工艺美术运动", labelEn: "Arts & Crafts", desc: "手工、自然、质朴、有机线条、反工业、田园诗意" },
+  { id: "artNouveau", label: "新艺术", labelEn: "Art Nouveau", desc: "流动曲线、植物藤蔓、柔美、自然主义、浪漫、优雅韵律" },
+  { id: "mementoMori", label: "维多利亚哀悼风", labelEn: "Memento Mori", desc: "死亡意象、暗黑浪漫、复古、忧郁、骷髅/棺木符号、黑色与珍珠" },
+  { id: "steampunk", label: "蒸汽朋克", labelEn: "Steampunk", desc: "齿轮、黄铜、维多利亚复古、机械、工业革命、奇幻复古未来" },
+  { id: "brutalist", label: "粗野主义", labelEn: "Brutalist", desc: "原始、几何、厚重、硬朗、无修饰、工业感、力量感" },
+  { id: "baroque", label: "巴洛克", labelEn: "Baroque", desc: "华丽、繁复、动态、戏剧、奢华、光影强烈、夸张张力" },
+  { id: "rococo", label: "洛可可", labelEn: "Rococo", desc: "柔美、轻盈、甜腻、曲线、粉彩、装饰性极强、贵族浪漫" },
+  { id: "byzantine", label: "拜占庭", labelEn: "Byzantine", desc: "金箔、宗教、对称、华丽镶嵌、神圣庄严" },
 ];
 
 const MAX_STYLE_SELECTIONS = 3;
@@ -932,28 +932,40 @@ export default function Step1Input() {
                 <div
                   role="listbox"
                   aria-label="选择风格参考"
-                  className={`${STEP1_MODEL_MENU_PANEL} w-[420px] grid grid-cols-2 gap-1 p-1`}
+                  className={`${STEP1_MODEL_MENU_PANEL} w-[460px] grid grid-cols-2 gap-1 p-2`}
                   onMouseDown={(e) => e.stopPropagation()}
                 >
-                  {STYLE_OPTIONS.map((style) => (
-                    <button
+                  {STYLE_OPTIONS.map((style, index) => (
+                    <div
                       key={style.id}
-                      type="button"
-                      role="option"
-                      aria-selected={selectedStyles.includes(style.id)}
-                      className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition ${
-                        selectedStyles.includes(style.id)
-                          ? "bg-amber-50 font-semibold text-amber-900"
-                          : "text-[#363028] hover:bg-[color-mix(in_srgb,var(--create-surface-tray)_12%,var(--create-surface-paper))]"
-                      }`}
-                      onClick={() => toggleStyle(style.id)}
+                      className="group relative"
+                      style={{
+                        zIndex: 50 - index,
+                      }}
                     >
-                      <span>{style.label}</span>
-                      <span className="text-[11px] opacity-60">{style.labelEn}</span>
-                      {selectedStyles.includes(style.id) ? (
-                        <span className="text-amber-700">✓</span>
-                      ) : null}
-                    </button>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={selectedStyles.includes(style.id)}
+                        className={`flex w-full items-center justify-between rounded-xl border border-transparent bg-white px-3 py-2 text-left text-sm shadow-sm transition-all duration-200 ease-out group-hover:-translate-y-1.5 group-hover:scale-[1.02] group-hover:shadow-lg ${
+                          selectedStyles.includes(style.id)
+                            ? "border-amber-300 bg-amber-50 font-semibold text-amber-900"
+                            : "text-[#363028]"
+                        }`}
+                        onClick={() => toggleStyle(style.id)}
+                      >
+                        <span>{style.label}</span>
+                        <span className="text-[11px] opacity-60">{style.labelEn}</span>
+                        {selectedStyles.includes(style.id) ? (
+                          <span className="text-amber-700">✓</span>
+                        ) : null}
+                      </button>
+                      <div className="pointer-events-none absolute left-full top-1/2 ml-2 -translate-y-1/2 z-[60] hidden max-w-[200px] rounded-xl bg-white px-3 py-2 text-xs text-gray-700 shadow-lg ring-1 ring-gray-200 group-hover:block whitespace-normal">
+                        <div className="font-semibold text-gray-900">{style.label}</div>
+                        <div className="text-[11px] opacity-60">{style.labelEn}</div>
+                        <div className="mt-1 text-[10px] text-gray-600">{style.desc}</div>
+                      </div>
+                    </div>
                   ))}
                   <div className="col-span-2 border-t border-gray-200 px-3 py-2 mt-1">
                     <button
