@@ -8,6 +8,7 @@ export const runtime = "nodejs";
 
 type Body = {
   prompt: string;
+  selectedStyles?: string[];
 };
 
 export async function POST(req: Request) {
@@ -16,13 +17,14 @@ export async function POST(req: Request) {
 
   const body = (await req.json().catch(() => ({}))) as Partial<Body>;
   const prompt = typeof body.prompt === "string" ? body.prompt : "";
+  const selectedStyles = Array.isArray(body.selectedStyles) ? body.selectedStyles.filter(Boolean) : [];
   if (!prompt.trim()) {
     return NextResponse.json({ message: "缺少 prompt" }, { status: 400 });
   }
 
   try {
     const kind = inferJewelryProductKind(prompt);
-    const result = await expandStep1PromptWithAi({ prompt, kind });
+    const result = await expandStep1PromptWithAi({ prompt, kind, selectedStyles });
     return NextResponse.json({
       expandedPrompt: result.expandedPrompt,
       model: result.model,

@@ -291,7 +291,10 @@ export default function Step1Input() {
         method: "POST",
         credentials: "include",
         headers: withDesktopLocalHeader({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ prompt: rawPrompt }),
+        body: JSON.stringify({ 
+          prompt: rawPrompt,
+          selectedStyles: selectedStyles.map(id => STYLE_OPTIONS.find(s => s.id === id)?.label || id).filter(Boolean),
+        }),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as { message?: string } | null;

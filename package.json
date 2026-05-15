@@ -54,7 +54,7 @@
   },
   "build": {
     "appId": "com.gemmuse.desktop",
-    "productName": "GemMuse 2.2",
+    "productName": "GemMuse 2.3",
     "copyright": "Copyright © Ryan 丁",
     "executableName": "GemMuseDesktop",
     "artifactName": "${productName}-${version}-${arch}.${ext}",

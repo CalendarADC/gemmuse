@@ -3,6 +3,7 @@ import type { JewelryProductKind } from "@/lib/ai/jewelrySoftLimits";
 type ExpandArgs = {
   prompt: string;
   kind: JewelryProductKind;
+  selectedStyles?: string[];
 };
 
 type ExpandResult = {
@@ -101,6 +102,13 @@ export async function expandStep1PromptWithAi(args: ExpandArgs): Promise<ExpandR
     "LANGUAGE (HARD): The entire expanded output MUST be written in Simplified Chinese (简体中文).",
     "Do not write the expanded prompt primarily in English. You may keep short unavoidable tokens (e.g. 925, AU750, 4K, brand codes) inline where natural.",
     "",
+    "=== 强制开头格式（必须严格遵守）===",
+    "根据品类判断（戒指/吊坠），输出必须以以下格式开头：",
+    "- 戒指：设计一枚S925银戒指，【风格1融合风格2融合风格3】，设计主体是【设计元素】",
+    "- 吊坠：设计一枚S925银吊坠，【风格1融合风格2融合风格3】，设计主体是【设计元素】",
+    "",
+    "例子：用户输入「向日葵戒指」选择哥特风+维多利亚哀悼风 → 开头必须为：设计一枚S925银戒指，哥特风融合维多利亚哀悼风格，设计主体是向日葵",
+    "",
     "Task: 将用户输入改写为一段可直接用于 AI 生图的、精炼的简体中文提示词（电商主图级清晰度）。",
     "保持用户原始主题与意图不变；不要擅自更换品类（戒指/吊坠等以用户与品类推断为准）。",
     "补充珠宝专业表达：材质、工艺、可生产性、镶嵌逻辑、轮廓与光影，但避免空洞堆砌。",
@@ -115,9 +123,10 @@ export async function expandStep1PromptWithAi(args: ExpandArgs): Promise<ExpandR
 
   const user = [
     `品类（推断）: ${args.kind}`,
+    args.selectedStyles?.length ? `用户已选风格: ${args.selectedStyles.join(" + ")}` : "",
     "用户原始提示:",
     args.prompt.trim(),
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   const payload = {
     model,
