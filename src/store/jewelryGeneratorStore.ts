@@ -1617,7 +1617,10 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
         });
       },
 
-      enhanceGalleryImages: async ({ onModel, left, right, rear, front }) => {
+      enhanceGalleryImages: async ({ wearGender = null, onModel: onModelLegacy, left, right, rear, front }) => {
+        const wearGenderSelected =
+          wearGender === "male" || wearGender === "female" ? wearGender : null;
+        const onModel = wearGenderSelected !== null || !!onModelLegacy;
         const {
           provider,
           prompt,
@@ -1645,7 +1648,9 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
           return false;
         }
         if (!onModel && !left && !right && !rear && !front) {
-          set({ error: "请至少选择一个生成选项：穿戴图/左侧/右侧/后视图/正视图。" });
+          set({
+            error: "请至少选择一个生成选项：穿戴图（需先点「穿」选择男/女）/左侧/右侧/后视图/正视图。",
+          });
           return false;
         }
 
@@ -1702,6 +1707,7 @@ export const useJewelryGeneratorStore = create<JewelryGeneratorStore>()(
                   selectedMainImageId: item.id,
                   selectedMainImageUrl,
                   onModel: plan.onModel,
+                  wearGender: plan.onModel ? wearGenderSelected ?? undefined : undefined,
                   left: plan.left,
                   right: plan.right,
                   rear: plan.rear,

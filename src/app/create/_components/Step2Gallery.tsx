@@ -13,6 +13,10 @@ import { downloadImage } from "@/lib/ui/downloadImage";
 import { CREATE_STEP_INSET, CREATE_STEP_PAPER } from "./createStepShell";
 import { step1CircleBtnClass } from "./createToolbarCircleButton";
 import { IconStep2Favorites, IconStep2History, IconStep2SelectAll } from "./step2ToolbarIcons";
+import {
+  step2WearGenderButtonLabel,
+  type Step2WearGender,
+} from "@/lib/step2/step2WearGender";
 
 const STEP2_MODEL_MENU_PANEL =
   "absolute left-0 top-full z-[35] mt-1.5 min-w-max max-w-[min(100vw-2rem,280px)] overflow-hidden rounded-xl border border-[rgba(94,111,130,0.18)] bg-[var(--create-surface-paper)] py-1 shadow-lg";
@@ -87,7 +91,9 @@ export default function Step2Gallery() {
   const [viewMode, setViewMode] = useState<"current" | "history" | "favorites">("current");
 
   // 融入原 Step3：视角选择
-  const [onModel, setOnModel] = useState(false);
+  const [wearGender, setWearGender] = useState<Step2WearGender | null>(null);
+  const [wearMenuOpen, setWearMenuOpen] = useState(false);
+  const step2WearToolbarRef = useRef<HTMLDivElement>(null);
   const [left, setLeft] = useState(false);
   const [right, setRight] = useState(false);
   const [rear, setRear] = useState(false);
@@ -177,13 +183,30 @@ export default function Step2Gallery() {
     };
   }, [step2ModelMenuOpen]);
 
+  useEffect(() => {
+    if (!wearMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (step2WearToolbarRef.current?.contains(e.target as Node)) return;
+      setWearMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setWearMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [wearMenuOpen]);
+
   const displayElapsedMs =
     status.step3Generating && step3StartedAt != null
       ? Date.now() - step3StartedAt + step3TimerTick * 0
       : 0;
 
   const canStartGalleryEnhance =
-    selectedMainImageIds.length > 0 && (onModel || left || right || rear || front);
+    selectedMainImageIds.length > 0 && (wearGender !== null || left || right || rear || front);
 
   return (
     <div className="space-y-6">
@@ -512,17 +535,79 @@ export default function Step2Gallery() {
             <div className="shrink-0 text-sm font-semibold text-[#5c534c]">新增其他视角</div>
 
             <div className="flex flex-wrap items-center gap-3" role="group" aria-label="多视角选择">
-              <button
-                type="button"
-                disabled={status.step3Generating}
-                aria-pressed={onModel}
-                aria-label="穿戴图"
-                title="穿戴图"
-                className={step1CircleBtnClass(onModel, status.step3Generating)}
-                onClick={() => setOnModel((v) => !v)}
-              >
-                <span className="pointer-events-none select-none text-sm font-semibold leading-none">穿</span>
-              </button>
+              <div className="relative" ref={step2WearToolbarRef}>
+                <button
+                  type="button"
+                  disabled={status.step3Generating}
+                  aria-haspopup="listbox"
+                  aria-expanded={wearMenuOpen}
+                  aria-pressed={wearGender !== null}
+                  aria-label={
+                    wearGender === "male"
+                      ? "穿戴图：男性佩戴（已选）"
+                      : wearGender === "female"
+                        ? "穿戴图：女性佩戴（已选）"
+                        : "穿戴图：选择男性或女性佩戴"
+                  }
+                  title={
+                    wearGender === "male"
+                      ? "已选男性佩戴，点击可更换"
+                      : wearGender === "female"
+                        ? "已选女性佩戴，点击可更换"
+                        : "选择穿戴图性别（男/女）"
+                  }
+                  className={step1CircleBtnClass(wearGender !== null, status.step3Generating)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setWearMenuOpen((o) => !o);
+                  }}
+                >
+                  <span className="pointer-events-none select-none text-sm font-semibold leading-none">
+                    {step2WearGenderButtonLabel(wearGender)}
+                  </span>
+                </button>
+                {wearMenuOpen && !status.step3Generating ? (
+                  <div
+                    role="listbox"
+                    aria-label="选择穿戴图性别"
+                    className={STEP2_MODEL_MENU_PANEL}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={wearGender === "male"}
+                      className={`block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition ${
+                        wearGender === "male"
+                          ? "bg-amber-50 font-semibold text-amber-900"
+                          : "text-[#363028] hover:bg-[color-mix(in_srgb,var(--create-surface-tray)_12%,var(--create-surface-paper))]"
+                      }`}
+                      onClick={() => {
+                        setWearGender((g) => (g === "male" ? null : "male"));
+                        setWearMenuOpen(false);
+                      }}
+                    >
+                      男性
+                    </button>
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={wearGender === "female"}
+                      className={`block w-full whitespace-nowrap px-3 py-2 text-left text-sm transition ${
+                        wearGender === "female"
+                          ? "bg-amber-50 font-semibold text-amber-900"
+                          : "text-[#363028] hover:bg-[color-mix(in_srgb,var(--create-surface-tray)_12%,var(--create-surface-paper))]"
+                      }`}
+                      onClick={() => {
+                        setWearGender((g) => (g === "female" ? null : "female"));
+                        setWearMenuOpen(false);
+                      }}
+                    >
+                      女性
+                    </button>
+                  </div>
+                ) : null}
+              </div>
 
               <button
                 type="button"
@@ -682,7 +767,7 @@ export default function Step2Gallery() {
               canStart={canStartGalleryEnhance}
               loading={status.step3Generating}
               onClick={async () => {
-                const ok = await enhanceGalleryImages({ onModel, left, right, rear, front });
+                const ok = await enhanceGalleryImages({ wearGender, left, right, rear, front });
                 if (ok) router.push("/create/gallery");
               }}
               ariaLabel="生成展示图组合"

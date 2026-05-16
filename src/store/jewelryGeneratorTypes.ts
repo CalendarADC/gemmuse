@@ -1,3 +1,5 @@
+import type { Step2WearGender } from "@/lib/step2/step2WearGender";
+
 export type AIProvider = "nano-banana-pro" | "chatgpt-1.5";
 export type Step1ExpansionStrength = "standard" | "strong";
 /** Step1/2：老张 Banana pro（Pro）/ Banana 2（Flash）/ GPT Image 2 */
@@ -174,7 +176,10 @@ export type JewelryGeneratorStore = {
   addGalleryImages: (images: GalleryImage[]) => void;
   clearGalleryImages: () => void;
   enhanceGalleryImages: (args: {
-    onModel: boolean;
+    /** 穿戴图：选择男性或女性佩戴；未选则不生成穿戴图 */
+    wearGender?: Step2WearGender | null;
+    /** @deprecated 请使用 wearGender */
+    onModel?: boolean;
     left: boolean;
     right: boolean;
     rear: boolean;

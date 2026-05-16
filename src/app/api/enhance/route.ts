@@ -24,6 +24,11 @@ import {
   userSpecifiedPendantOrNecklaceRearDetail,
   userWantsWomensRingOnModelPresentation,
 } from "@/lib/ai/jewelrySoftLimits";
+import {
+  buildRingMensOnModelPresentationBlock,
+  buildWearGenderPresentationBlock,
+  type Step2WearGender,
+} from "@/lib/step2/step2WearGender";
 import { requireApiActiveUser } from "@/lib/apiAuth";
 import { resolveLaoZhangApiKeyFromRequest } from "@/lib/apiLaoZhangKey";
 import { getDesktopDbMode } from "@/lib/desktop/desktopDbMode";
@@ -107,6 +112,8 @@ type Body = {
   /** 清晰度：1K（最快）、2K（均衡）、4K（最高清） */
   imageSize?: "1K" | "2K" | "4K";
   onModel: boolean;
+  /** Step2 穿戴图：用户选择的佩戴者性别 */
+  wearGender?: Step2WearGender;
   left: boolean;
   right: boolean;
   rear: boolean;
@@ -168,7 +175,9 @@ export async function POST(req: Request) {
   const fastMode = body.fastMode as boolean | undefined;
   const resolution = imageSizeRaw || (fastMode === true ? "2K" : fastMode === false ? "4K" : "1K");
 
-  const onModel = !!body.onModel;
+  const wearGender: Step2WearGender | null =
+    body.wearGender === "male" || body.wearGender === "female" ? body.wearGender : null;
+  const onModel = !!body.onModel || wearGender !== null;
   const left = !!body.left;
   const right = !!body.right;
   const rear = !!body.rear;
@@ -372,6 +381,10 @@ export async function POST(req: Request) {
     };
 
     if (onModel) {
+      const useFemaleRingPresentation =
+        wearGender === "female" ||
+        (wearGender === null && userWantsWomensRingOnModelPresentation(prompt));
+      const useMaleRingPresentation = wearGender === "male";
       const onModelLines =
         kind === "ring"
           ? [
@@ -379,10 +392,10 @@ export async function POST(req: Request) {
               "COLOR / GRADE HARMONY: match the **metal warmth and overall color grade** of the init hero (same alloy read); background may be clean studio but must **not** invent a totally unrelated mood that makes the ring read as a different SKU.",
               step3InputImageSovereigntyOnModelBlock(),
               baseKeepInstructionOnModel,
+              ...(wearGender ? [buildWearGenderPresentationBlock(wearGender, kind)] : []),
               "Generate an on-model shot where the ring is worn on a human hand in a studio product photography style.",
-              ...(userWantsWomensRingOnModelPresentation(prompt)
-                ? [buildRingWomensOnModelLuxuryPresentationBlock()]
-                : []),
+              ...(useFemaleRingPresentation ? [buildRingWomensOnModelLuxuryPresentationBlock()] : []),
+              ...(useMaleRingPresentation ? [buildRingMensOnModelPresentationBlock()] : []),
               "FRAMING (strict): do NOT do an extreme close-up of a single finger segment. Show a fuller hand-worn context (at least most of the hand, ideally full hand in frame) so wearing scale looks realistic and natural.",
               "Composition preference: 3/4 hand view or palm-down full-hand showcase with the ring clearly readable; keep natural anatomy and believable perspective.",
               "Use a clean, Etsy-friendly background. Natural lighting, sharp focus, realistic reflections.",
@@ -395,6 +408,7 @@ export async function POST(req: Request) {
               "COLOR / GRADE HARMONY: keep **pendant metal and stone hues** consistent with the init reference.",
               step3InputImageSovereigntyOnModelBlock(),
               baseKeepInstructionOnModel,
+              ...(wearGender ? [buildWearGenderPresentationBlock(wearGender, kind)] : []),
               step3PendantBailTopologyLockBlock(true),
               "Generate an on-model shot: necklace/pendant worn naturally (cropped framing, no face focus), studio product photography.",
               "FRAMING (strict): avoid over-tight local crop; keep enough upper-torso/neck context so the wearing presentation reads as a complete on-model view.",
