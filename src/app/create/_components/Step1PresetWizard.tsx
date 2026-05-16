@@ -134,13 +134,13 @@ export default function Step1PresetWizard({ open, mode, initial, onClose, onSave
         {step === 0 ? (
           <div className="space-y-2">
             <p className="text-sm text-gray-600">
-              输入设计元素，多个元素请用英文逗号分隔（如：小鸟,小鸡,小鸭子）
+              多个独立元素用逗号分隔；同一组合主题内的子元素用 + 连接（仍算 1 个元素）。
             </p>
             <textarea
               className="min-h-[120px] w-full rounded-xl border border-[rgba(94,111,130,0.2)] p-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               value={elementRaw}
               onChange={(e) => setElementRaw(e.target.value)}
-              placeholder="小鸟,小鸡,小鸭子"
+              placeholder="天使翅+天体+卢恩符文,小鸟,小鸡"
             />
             {elements.length > 0 ? (
               <p className="text-xs text-gray-500">已识别 {elements.length} 个元素：{elements.join("、")}</p>

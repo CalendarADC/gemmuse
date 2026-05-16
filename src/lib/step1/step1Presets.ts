@@ -50,16 +50,29 @@ export function materialLabel(id: Step1Material): string {
   return MATERIAL_OPTIONS.find((o) => o.id === id)?.label ?? id;
 }
 
-/** 解析英文逗号分隔的元素池（支持粘贴「小鸟,小鸡,小鸭子」） */
+/** 元素池项之间的分隔符（不含 +，+ 用于同一元素内的组合子主题） */
+const ELEMENT_POOL_DELIMITER = /[,，]/;
+
+/**
+ * 解析元素池：仅用中英文逗号分格为多个元素。
+ * 元素内部的 `+` / `＋`（可带空格）表示组合主题，仍计为 **一个** 元素，例如「天使翅+天体+卢恩符文」→ 1 项。
+ */
 export function parseElementPoolInput(raw: string): string[] {
   return raw
-    .split(/[,，]/)
-    .map((s) => s.trim())
+    .split(ELEMENT_POOL_DELIMITER)
+    .map(normalizeElementPoolToken)
     .filter(Boolean);
 }
 
+/** 归一化单个元素：去首尾空白，压缩 + 两侧多余空格，便于存储与骰子调用 */
+export function normalizeElementPoolToken(token: string): string {
+  return token
+    .trim()
+    .replace(/\s*([+＋])\s*/g, "$1");
+}
+
 export function formatElementPool(elements: string[]): string {
-  return elements.join(",");
+  return elements.map(normalizeElementPoolToken).filter(Boolean).join(",");
 }
 
 function pickRandomUnique<T>(pool: T[], count: number): T[] {
