@@ -22,7 +22,7 @@ export type Step1PresetWizardSavePayload = {
   elements: string[];
   styleIds: string[];
   designObject: Step1DesignObject;
-  material: Step1Material;
+  materials: Step1Material[];
   diceStrength: Step1DiceStrength;
 };
 
@@ -41,7 +41,7 @@ export default function Step1PresetWizard({ open, mode, initial, onClose, onSave
   const [elementRaw, setElementRaw] = useState("");
   const [styleIds, setStyleIds] = useState<string[]>([]);
   const [designObject, setDesignObject] = useState<Step1DesignObject>("ring");
-  const [material, setMaterial] = useState<Step1Material>("s925");
+  const [materials, setMaterials] = useState<Step1Material[]>(["s925"]);
   const [diceStrength, setDiceStrength] = useState<Step1DiceStrength>("single_element_single_style");
 
   useEffect(() => {
@@ -51,13 +51,13 @@ export default function Step1PresetWizard({ open, mode, initial, onClose, onSave
       setElementRaw(formatElementPool(initial.elements));
       setStyleIds([...initial.styleIds]);
       setDesignObject(initial.designObject);
-      setMaterial(initial.material);
+      setMaterials(initial.materials.length ? [...initial.materials] : ["s925"]);
       setDiceStrength(initial.diceStrength);
     } else {
       setElementRaw("");
       setStyleIds([]);
       setDesignObject("ring");
-      setMaterial("s925");
+      setMaterials(["s925"]);
       setDiceStrength("single_element_single_style");
     }
   }, [open, initial]);
@@ -73,16 +73,21 @@ export default function Step1PresetWizard({ open, mode, initial, onClose, onSave
       elements: elements.join("、"),
       styles: styleLabels || "—",
       object: DESIGN_OBJECT_OPTIONS.find((o) => o.id === designObject)?.label ?? "—",
-      mat: MATERIAL_OPTIONS.find((o) => o.id === material)?.label ?? "—",
+      mat:
+        materials
+          .map((id) => MATERIAL_OPTIONS.find((o) => o.id === id)?.label)
+          .filter(Boolean)
+          .join("、") || "—",
       dice: DICE_STRENGTH_OPTIONS.find((o) => o.id === diceStrength)?.label ?? "—",
     };
-  }, [elements, styleIds, designObject, material, diceStrength]);
+  }, [elements, styleIds, designObject, materials, diceStrength]);
 
   if (!open) return null;
 
   const canNext = () => {
     if (step === 0) return elements.length > 0;
     if (step === 1) return styleIds.length > 0;
+    if (step === 3) return materials.length > 0;
     return true;
   };
 
@@ -94,7 +99,7 @@ export default function Step1PresetWizard({ open, mode, initial, onClose, onSave
       elements,
       styleIds,
       designObject,
-      material,
+      materials,
       diceStrength,
     });
     onClose();
@@ -102,6 +107,10 @@ export default function Step1PresetWizard({ open, mode, initial, onClose, onSave
 
   const toggleStyle = (id: string) => {
     setStyleIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const toggleMaterial = (id: Step1Material) => {
+    setMaterials((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
   return (
@@ -179,11 +188,30 @@ export default function Step1PresetWizard({ open, mode, initial, onClose, onSave
         ) : null}
 
         {step === 3 ? (
-          <OptionGrid
-            options={MATERIAL_OPTIONS}
-            selected={material}
-            onSelect={(id) => setMaterial(id as Step1Material)}
-          />
+          <div>
+            <p className="mb-2 text-sm text-gray-600">可多选；骰子每次从中随机选一种材质。</p>
+            <div className="flex flex-col gap-2">
+              {MATERIAL_OPTIONS.map((opt, index) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className={[
+                    "rounded-xl border px-4 py-3 text-left text-sm transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md",
+                    materials.includes(opt.id)
+                      ? "border-amber-300 bg-amber-50 font-semibold text-amber-900"
+                      : "border-[rgba(94,111,130,0.15)] bg-white text-[#363028]",
+                  ].join(" ")}
+                  style={{ zIndex: 20 - index }}
+                  onClick={() => toggleMaterial(opt.id)}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    {opt.label}
+                    {materials.includes(opt.id) ? <span className="text-amber-700">✓</span> : null}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
         ) : null}
 
         {step === 4 ? (

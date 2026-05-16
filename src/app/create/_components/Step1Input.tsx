@@ -21,6 +21,7 @@ import {
   loadActivePresetId,
   loadStep1Presets,
   saveActivePresetId,
+  mergeImportedStep1Presets,
   saveStep1Presets,
   type Step1Preset,
 } from "@/lib/step1/step1Presets";
@@ -375,11 +376,17 @@ export default function Step1Input() {
   const [presetWizardMode, setPresetWizardMode] = useState<"create" | "edit">("create");
   const [presetWizardInitial, setPresetWizardInitial] = useState<Step1Preset | null>(null);
   const [presetDeleteTarget, setPresetDeleteTarget] = useState<Step1Preset | null>(null);
+  const [presetRenameTarget, setPresetRenameTarget] = useState<Step1Preset | null>(null);
+  const [presetRenameDraft, setPresetRenameDraft] = useState("");
 
   useEffect(() => {
     setPresets(loadStep1Presets());
     setActivePresetId(loadActivePresetId());
   }, []);
+
+  useEffect(() => {
+    if (presetRenameTarget) setPresetRenameDraft(presetRenameTarget.name);
+  }, [presetRenameTarget]);
 
   useEffect(() => {
     saveActivePresetId(activePresetId);
@@ -565,7 +572,7 @@ export default function Step1Input() {
               elements: payload.elements,
               styleIds: payload.styleIds,
               designObject: payload.designObject,
-              material: payload.material,
+              materials: payload.materials,
               diceStrength: payload.diceStrength,
               updatedAt: now,
             }
@@ -581,7 +588,7 @@ export default function Step1Input() {
       elements: payload.elements,
       styleIds: payload.styleIds,
       designObject: payload.designObject,
-      material: payload.material,
+      materials: payload.materials,
       diceStrength: payload.diceStrength,
       createdAt: now,
       updatedAt: now,
@@ -603,6 +610,23 @@ export default function Step1Input() {
     if (activePresetId === id) setActivePresetId(null);
     setPresetDeleteTarget(null);
     emitToast({ type: "info", message: "预设已删除。" });
+  };
+
+  const handlePresetRenameConfirm = () => {
+    if (!presetRenameTarget) return;
+    const name = presetRenameDraft.trim();
+    if (!name) return;
+    const id = presetRenameTarget.id;
+    const now = new Date().toISOString();
+    persistPresets(presets.map((p) => (p.id === id ? { ...p, name, updatedAt: now } : p)));
+    setPresetRenameTarget(null);
+    emitToast({ type: "success", message: "预设名称已更新。" });
+  };
+
+  const handleImportPresets = (incoming: Step1Preset[]) => {
+    const merged = mergeImportedStep1Presets(presets, incoming);
+    persistPresets(merged);
+    emitToast({ type: "success", message: `已导入 ${incoming.length} 个预设方案。` });
   };
 
   const handleDiceRoll = () => {
@@ -1181,6 +1205,7 @@ export default function Step1Input() {
                     setPresetWizardOpen(true);
                     setToolbarMenuOpen(null);
                   }}
+                  onRenameRequest={setPresetRenameTarget}
                   onDeleteRequest={setPresetDeleteTarget}
                   onCreateNew={() => {
                     setPresetWizardMode("create");
@@ -1188,6 +1213,11 @@ export default function Step1Input() {
                     setPresetWizardOpen(true);
                     setToolbarMenuOpen(null);
                   }}
+                  onImportPresets={handleImportPresets}
+                  onImportError={(message) => emitToast({ type: "error", message })}
+                  onExportSuccess={() =>
+                    emitToast({ type: "success", message: `已导出 ${presets.length} 个预设方案。` })
+                  }
                   onMouseDown={(e) => e.stopPropagation()}
                 />
               ) : null}
@@ -1273,6 +1303,58 @@ export default function Step1Input() {
         onClose={() => setPresetWizardOpen(false)}
         onSave={handlePresetWizardSave}
       />
+
+      {presetRenameTarget ? (
+        <div
+          className="fixed inset-0 z-[85] flex items-center justify-center bg-black/40 p-4"
+          role="presentation"
+          onClick={() => setPresetRenameTarget(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="preset-rename-title"
+            className="w-full max-w-sm rounded-2xl border border-[rgba(94,111,130,0.18)] bg-[var(--create-surface-paper)] p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="preset-rename-title" className="text-sm font-semibold text-gray-900">
+              命名预设
+            </h3>
+            <p className="mt-1 text-xs text-gray-500">新名称将显示在预设列表标题处。</p>
+            <input
+              type="text"
+              value={presetRenameDraft}
+              onChange={(e) => setPresetRenameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handlePresetRenameConfirm();
+              }}
+              className="mt-3 w-full rounded-xl border border-[rgba(94,111,130,0.2)] px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              autoFocus
+              maxLength={80}
+            />
+            <div className="mt-5 flex justify-end gap-2">
+              <BrandButton
+                type="button"
+                variant="outline"
+                shape="full"
+                onClick={() => setPresetRenameTarget(null)}
+                className="h-[34px] px-4 text-sm"
+              >
+                取消
+              </BrandButton>
+              <BrandButton
+                type="button"
+                shape="full"
+                disabled={!presetRenameDraft.trim()}
+                onClick={handlePresetRenameConfirm}
+                className="h-[34px] px-4 text-sm"
+              >
+                保存名称
+              </BrandButton>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {presetDeleteTarget ? (
         <div

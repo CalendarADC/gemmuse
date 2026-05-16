@@ -3,8 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   buildDicePrompt,
   formatElementPool,
+  mergeImportedStep1Presets,
   normalizeElementPoolToken,
+  normalizeStep1Preset,
   parseElementPoolInput,
+  parseStep1PresetsImportJson,
+  serializeStep1PresetsExport,
   type Step1Preset,
 } from "./step1Presets";
 
@@ -43,18 +47,59 @@ describe("normalizeElementPoolToken", () => {
   });
 });
 
-describe("buildDicePrompt", () => {
-  it("uses compound element as single theme token", () => {
-    const preset: Step1Preset = {
-      id: "p1",
-      name: "test",
-      elements: ["天使翅+天体+卢恩符文"],
+describe("normalizeStep1Preset", () => {
+  it("migrates legacy single material field", () => {
+    const preset = normalizeStep1Preset({
+      id: "p0",
+      name: "legacy",
+      elements: ["鸟"],
       styleIds: ["gothic"],
       designObject: "ring",
-      material: "s925",
+      material: "brass",
       diceStrength: "single_element_single_style",
       createdAt: "",
       updatedAt: "",
+    });
+    expect(preset?.materials).toEqual(["brass"]);
+  });
+});
+
+const samplePreset = (): Step1Preset => ({
+  id: "p1",
+  name: "test",
+  elements: ["鸟"],
+  styleIds: ["gothic"],
+  designObject: "ring",
+  materials: ["s925"],
+  diceStrength: "single_element_single_style",
+  createdAt: "",
+  updatedAt: "",
+});
+
+describe("step1 presets import/export", () => {
+  it("round-trips export json", () => {
+    const preset = samplePreset();
+    const json = serializeStep1PresetsExport([preset]);
+    const imported = parseStep1PresetsImportJson(json);
+    expect(imported).toHaveLength(1);
+    expect(imported[0]?.name).toBe("test");
+  });
+
+  it("merges import and reassigns conflicting ids", () => {
+    const existing = samplePreset();
+    const incoming = [{ ...existing, name: "copy" }];
+    const merged = mergeImportedStep1Presets([existing], incoming);
+    expect(merged).toHaveLength(2);
+    expect(merged[0]?.id).not.toBe(existing.id);
+    expect(merged[1]?.id).toBe(existing.id);
+  });
+});
+
+describe("buildDicePrompt", () => {
+  it("uses compound element as single theme token", () => {
+    const preset: Step1Preset = {
+      ...samplePreset(),
+      elements: ["天使翅+天体+卢恩符文"],
     };
     const prompt = buildDicePrompt(preset);
     expect(prompt).toContain("以天使翅+天体+卢恩符文作为设计主题");

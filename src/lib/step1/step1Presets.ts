@@ -15,7 +15,8 @@ export type Step1Preset = {
   elements: string[];
   styleIds: string[];
   designObject: Step1DesignObject;
-  material: Step1Material;
+  /** 材质池：骰子每次从中随机抽取一种 */
+  materials: Step1Material[];
   diceStrength: Step1DiceStrength;
   createdAt: string;
   updatedAt: string;
@@ -48,6 +49,55 @@ export function designObjectLabel(id: Step1DesignObject): string {
 
 export function materialLabel(id: Step1Material): string {
   return MATERIAL_OPTIONS.find((o) => o.id === id)?.label ?? id;
+}
+
+export function materialsLabel(ids: Step1Material[]): string {
+  const unique = [...new Set(ids)];
+  return unique.map(materialLabel).join("、") || "—";
+}
+
+const VALID_MATERIALS = new Set<Step1Material>(MATERIAL_OPTIONS.map((o) => o.id));
+
+function parseMaterialsFromStored(raw: unknown): Step1Material[] {
+  if (Array.isArray(raw)) {
+    const ids = raw.filter((id): id is Step1Material => typeof id === "string" && VALID_MATERIALS.has(id as Step1Material));
+    if (ids.length) return [...new Set(ids)];
+  }
+  if (typeof raw === "string" && VALID_MATERIALS.has(raw as Step1Material)) {
+    return [raw as Step1Material];
+  }
+  return ["s925"];
+}
+
+/** 兼容旧版仅存 `material` 单字段的预设数据 */
+export function normalizeStep1Preset(raw: unknown): Step1Preset | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.id !== "string" || typeof o.name !== "string") return null;
+  if (!Array.isArray(o.elements) || !Array.isArray(o.styleIds)) return null;
+  if (o.designObject !== "pendant" && o.designObject !== "ring") return null;
+  const diceStrength = o.diceStrength;
+  if (
+    diceStrength !== "single_element_single_style" &&
+    diceStrength !== "single_element_dual_style" &&
+    diceStrength !== "dual_element_single_style" &&
+    diceStrength !== "dual_element_dual_style"
+  ) {
+    return null;
+  }
+  const materials =
+    o.materials !== undefined ? parseMaterialsFromStored(o.materials) : parseMaterialsFromStored(o.material);
+  return {
+    id: o.id,
+    name: o.name,
+    elements: o.elements.filter((e): e is string => typeof e === "string"),
+    styleIds: o.styleIds.filter((s): s is string => typeof s === "string"),
+    designObject: o.designObject,
+    materials,
+    diceStrength,
+    createdAt: typeof o.createdAt === "string" ? o.createdAt : "",
+    updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : "",
+  };
 }
 
 /** 元素池项之间的分隔符（不含 +，+ 用于同一元素内的组合子主题） */
@@ -108,7 +158,8 @@ export function buildDicePrompt(preset: Step1Preset): string {
   const pickedStyles = pickedStyleIds.map(styleLabelById);
 
   const obj = designObjectLabel(preset.designObject);
-  const mat = materialLabel(preset.material);
+  const pickedMaterial = pickRandomUnique(preset.materials, 1)[0] ?? "s925";
+  const mat = materialLabel(pickedMaterial);
   const theme = pickedElements.join("和");
   const styles = pickedStyles.join("和");
 
@@ -120,8 +171,9 @@ export function loadStep1Presets(): Step1Preset[] {
   try {
     const raw = window.localStorage.getItem(STEP1_PRESETS_STORAGE_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw) as Step1Preset[];
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(raw) as unknown[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeStep1Preset).filter((p): p is Step1Preset => p !== null);
   } catch {
     return [];
   }
@@ -152,4 +204,77 @@ export function defaultPresetName(elements: string[], designObject: Step1DesignO
   const head = elements[0] ?? "未命名";
   const obj = designObject === "ring" ? "戒指" : "吊坠";
   return `${head}·${obj}`;
+}
+
+export const STEP1_PRESETS_EXPORT_VERSION = 1;
+
+export type Step1PresetsExportFile = {
+  version: number;
+  exportedAt: string;
+  presets: Step1Preset[];
+};
+
+export function buildStep1PresetsExportFile(presets: Step1Preset[]): Step1PresetsExportFile {
+  return {
+    version: STEP1_PRESETS_EXPORT_VERSION,
+    exportedAt: new Date().toISOString(),
+    presets,
+  };
+}
+
+export function serializeStep1PresetsExport(presets: Step1Preset[]): string {
+  return JSON.stringify(buildStep1PresetsExportFile(presets), null, 2);
+}
+
+export function step1PresetsExportFilename(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `gemmuse-step1-presets-${y}-${m}-${d}.json`;
+}
+
+/** 解析导入 JSON：支持导出包 `{ presets: [...] }` 或裸数组 `[...]` */
+export function parseStep1PresetsImportJson(text: string): Step1Preset[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    throw new Error("JSON 格式无效，请检查文件内容。");
+  }
+
+  let list: unknown[];
+  if (Array.isArray(parsed)) {
+    list = parsed;
+  } else if (parsed && typeof parsed === "object" && Array.isArray((parsed as Step1PresetsExportFile).presets)) {
+    list = (parsed as Step1PresetsExportFile).presets;
+  } else {
+    throw new Error("未找到预设列表，请使用 GemMuse 导出的 JSON 文件。");
+  }
+
+  const presets = list.map(normalizeStep1Preset).filter((p): p is Step1Preset => p !== null);
+  if (!presets.length) {
+    throw new Error("文件中没有有效的预设方案。");
+  }
+  return presets;
+}
+
+/** 导入时若 id 与本地冲突则分配新 id */
+export function preparePresetsForImport(incoming: Step1Preset[], existing: Step1Preset[]): Step1Preset[] {
+  const existingIds = new Set(existing.map((p) => p.id));
+  const now = new Date().toISOString();
+  return incoming.map((p) => {
+    const id = existingIds.has(p.id) ? createPresetId() : p.id;
+    if (!existingIds.has(p.id)) existingIds.add(id);
+    return {
+      ...p,
+      id,
+      createdAt: p.createdAt || now,
+      updatedAt: now,
+    };
+  });
+}
+
+export function mergeImportedStep1Presets(current: Step1Preset[], incoming: Step1Preset[]): Step1Preset[] {
+  const prepared = preparePresetsForImport(incoming, current);
+  return [...prepared, ...current];
 }
