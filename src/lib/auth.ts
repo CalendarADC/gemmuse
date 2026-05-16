@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 
 import { authOptions } from "@/lib/authOptions";
+import { isKeyOnlyAuthEnabled } from "@/lib/authMode";
 import { prisma } from "@/lib/db";
 import { isDesktopLocalServerMode } from "@/lib/runtime/desktopLocalMode";
 
@@ -21,18 +22,18 @@ function isPrismaPoolBusyError(error: unknown): boolean {
 }
 
 export async function requireActiveUser() {
-  if (isDesktopLocalServerMode()) {
+  if (isKeyOnlyAuthEnabled() || isDesktopLocalServerMode()) {
     return {
-      id: "desktop-local-user",
+      id: isKeyOnlyAuthEnabled() ? "web-local-user" : "desktop-local-user",
       email: null,
-      name: "Desktop Local User",
-      role: "ADMIN" as const,
+      name: isKeyOnlyAuthEnabled() ? "GemMuse User" : "Desktop Local User",
+      role: "USER" as const,
       status: "ACTIVE" as const,
     };
   }
 
   const session = await getAuthSession();
-  if (!session?.user?.id) redirect("/login");
+  if (!session?.user?.id) redirect("/create/design");
 
   let user: {
     id: string;
@@ -57,8 +58,7 @@ export async function requireActiveUser() {
     if (!isPrismaPoolBusyError(e)) throw e;
     const sessionStatus = session.user.status ?? "ACTIVE";
     if (sessionStatus !== "ACTIVE") {
-      if (sessionStatus === "PENDING") redirect("/pending");
-      redirect("/login");
+      redirect("/create/design");
     }
     user = {
       id: session.user.id,
@@ -69,9 +69,8 @@ export async function requireActiveUser() {
     };
   }
 
-  if (!user) redirect("/login");
-  if (user.status === "PENDING") redirect("/pending");
-  if (user.status !== "ACTIVE") redirect("/login");
+  if (!user) redirect("/create/design");
+  if (user.status !== "ACTIVE") redirect("/create/design");
 
   return user;
 }

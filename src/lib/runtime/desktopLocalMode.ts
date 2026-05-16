@@ -53,3 +53,8 @@ export function isDesktopBundledClientRequest(req: Request): boolean {
   if (envEnabled(process.env.DESKTOP_STRICT_LOCAL)) return true;
   return envEnabled(req.headers.get(DESKTOP_LOCAL_MODE_HEADER) ?? undefined);
 }
+
+/** 网页端 strict-local 客户端（带 x-gemmuse-web-local 请求头） */
+export function isWebLocalClientRequest(req: Request): boolean {
+  return envEnabled(req.headers.get(WEB_LOCAL_MODE_HEADER) ?? undefined);
+}

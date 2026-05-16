@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { hash } from "bcryptjs";
 
+import { isKeyOnlyAuthEnabled } from "@/lib/authMode";
 import { prisma } from "@/lib/db";
 
 type Body = {
@@ -10,6 +11,13 @@ type Body = {
 };
 
 export async function POST(req: Request) {
+  if (isKeyOnlyAuthEnabled()) {
+    return NextResponse.json(
+      { message: "注册已关闭，请打开创作页，在顶部「密钥」中填写 API Key 后使用。" },
+      { status: 403 },
+    );
+  }
+
   const body = (await req.json().catch(() => ({}))) as Body;
   const email = body.email?.trim().toLowerCase() ?? "";
   const password = body.password?.trim() ?? "";
