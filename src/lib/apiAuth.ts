@@ -19,6 +19,20 @@ function isPrismaPoolBusyError(error: unknown): boolean {
   );
 }
 
+/** 本地开发未配 DATABASE_URL、Prisma 未初始化等：有会话时回退到 JWT 中的用户信息 */
+function isPrismaSessionLookupSoftFailError(error: unknown): boolean {
+  if (isPrismaPoolBusyError(error)) return true;
+  if (!(error instanceof Error)) return false;
+  const msg = error.message;
+  return (
+    msg.includes("Environment variable not found: DATABASE_URL") ||
+    msg.includes("PrismaClientInitializationError") ||
+    msg.includes("Can't reach database server") ||
+    msg.includes("P1001") ||
+    msg.includes("P1017")
+  );
+}
+
 const DESKTOP_RUNTIME_USER_EMAIL =
   process.env.DESKTOP_RUNTIME_USER_EMAIL?.trim() || "gemmuse-desktop-runtime@local.invalid";
 
@@ -67,7 +81,7 @@ export async function requireApiActiveUser(req: Request): Promise<RequireApiActi
         select: { id: true, role: true, status: true },
       });
     } catch (e) {
-      if (!isPrismaPoolBusyError(e)) throw e;
+      if (!isPrismaSessionLookupSoftFailError(e)) throw e;
       const sessionStatus = session.user.status ?? "ACTIVE";
       if (sessionStatus !== "ACTIVE") {
         return {

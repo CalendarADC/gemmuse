@@ -15,12 +15,21 @@ type OpenAiChatResponse = {
   choices?: Array<{
     message?: {
       content?: string;
+      reasoning_content?: string;
     };
   }>;
   error?: {
     message?: string;
   };
 };
+
+function extractAssistantText(
+  message?: { content?: string; reasoning_content?: string } | null
+): string {
+  const content = message?.content?.trim() ?? "";
+  if (content) return content;
+  return message?.reasoning_content?.trim() ?? "";
+}
 
 function requireStep1ExpandApiKey(): string {
   const k = process.env.STEP1_EXPAND_API_KEY?.trim();
@@ -170,7 +179,7 @@ export async function expandStep1PromptWithAi(args: ExpandArgs): Promise<ExpandR
       let content = "";
       try {
         const data = JSON.parse(text) as OpenAiChatResponse;
-        content = data?.choices?.[0]?.message?.content?.trim() || "";
+        content = extractAssistantText(data?.choices?.[0]?.message);
       } catch {
         content = text.trim();
       }

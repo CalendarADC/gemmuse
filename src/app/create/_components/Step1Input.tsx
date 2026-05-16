@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useJewelryGeneratorStore } from "@/store/jewelryGeneratorStore";
 import Step1FlipClock from "./Step1FlipClock";
 import Step1GenerateButton from "./Step1GenerateButton";
@@ -11,6 +12,20 @@ import ResolutionToggleIcon from "./ResolutionToggleIcon";
 import { detectCappyCalmMaterialPreset } from "@/lib/ip/cappyCalm";
 import { emitToast } from "@/lib/ui/toast";
 import { withDesktopLocalHeader } from "@/lib/runtime/desktopLocalMode";
+import { STEP1_STYLE_OPTIONS } from "@/lib/step1/step1StyleOptions";
+import BrandButton from "./BrandButton";
+import {
+  buildDicePrompt,
+  createPresetId,
+  defaultPresetName,
+  loadActivePresetId,
+  loadStep1Presets,
+  saveActivePresetId,
+  saveStep1Presets,
+  type Step1Preset,
+} from "@/lib/step1/step1Presets";
+import Step1PresetMenu from "./Step1PresetMenu";
+import Step1PresetWizard, { type Step1PresetWizardSavePayload } from "./Step1PresetWizard";
 
 const MAX_REFERENCE_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_REFERENCE_IMAGE_PAYLOAD_BYTES = 900 * 1024;
@@ -26,7 +41,7 @@ const STEP1_PROMPT_TEXTAREA_MAX_PX = 320;
 /** AI 扩写进行中：琥珀高亮 + 脉冲，与生成按钮禁用态呼应 */
 const STEP1_EXPAND_BULB_CLASS = `${STEP1_CIRCLE_BTN_BASE} pointer-events-none border-amber-400 bg-amber-50 text-amber-900 shadow-[0_0_18px_rgba(245,158,11,0.5)] ring-2 ring-amber-300/80 ring-offset-1 ring-offset-[var(--create-surface-paper)] animate-[pulse_0.85s_ease-in-out_infinite]`;
 
-type Step1ToolbarMenu = "model" | "count" | "style";
+type Step1ToolbarMenu = "model" | "count" | "style" | "preset";
 
 const STEP1_MENU_PANEL =
   "absolute left-0 top-full z-[35] mt-1.5 min-w-[158px] overflow-hidden rounded-xl border border-[rgba(94,111,130,0.18)] bg-[var(--create-surface-paper)] py-1 shadow-lg";
@@ -35,35 +50,131 @@ const STEP1_MENU_PANEL =
 const STEP1_MODEL_MENU_PANEL =
   "absolute left-0 top-full z-[35] mt-1.5 min-w-max max-w-[min(100vw-2rem,280px)] overflow-hidden rounded-xl border border-[rgba(94,111,130,0.18)] bg-[var(--create-surface-paper)] py-1 shadow-lg";
 
-const STYLE_OPTIONS = [
-  { id: "gothic", label: "哥特风", labelEn: "Gothic", desc: "暗黑、尖拱、神秘、宗教、冷峻、骨感、戏剧张力" },
-  { id: "celtic", label: "凯尔特 / 北欧", labelEn: "Celtic & Norse", desc: "结纹、符文、自然、图腾、复古、原始力量、螺旋缠绕" },
-  { id: "artsCrafts", label: "工艺美术运动", labelEn: "Arts & Crafts", desc: "手工、自然、质朴、有机线条、反工业、田园诗意" },
-  { id: "artNouveau", label: "新艺术", labelEn: "Art Nouveau", desc: "流动曲线、植物藤蔓、柔美、自然主义、浪漫、优雅韵律" },
-  { id: "mementoMori", label: "维多利亚哀悼风", labelEn: "Memento Mori", desc: "死亡意象、暗黑浪漫、复古、忧郁、骷髅/棺木符号、黑色与珍珠" },
-  { id: "steampunk", label: "蒸汽朋克", labelEn: "Steampunk", desc: "齿轮、黄铜、维多利亚复古、机械、工业革命、奇幻复古未来" },
-  { id: "brutalist", label: "粗野主义", labelEn: "Brutalist", desc: "原始、几何、厚重、硬朗、无修饰、工业感、力量感" },
-  { id: "baroque", label: "巴洛克", labelEn: "Baroque", desc: "华丽、繁复、动态、戏剧、奢华、光影强烈、夸张张力" },
-  { id: "rococo", label: "洛可可", labelEn: "Rococo", desc: "柔美、轻盈、甜腻、曲线、粉彩、装饰性极强、贵族浪漫" },
-  { id: "byzantine", label: "拜占庭", labelEn: "Byzantine", desc: "金箔、宗教、对称、华丽镶嵌、神圣庄严" },
-];
+const STEP1_STYLE_MENU_PANEL =
+  "absolute left-0 top-full z-[35] mt-1.5 overflow-visible rounded-xl border border-[rgba(94,111,130,0.18)] bg-[var(--create-surface-paper)] shadow-lg";
 
 const MAX_STYLE_SELECTIONS = 3;
 
-/** 魔法帽子图标 - 风格选择器 */
+function Step1StyleMenuOption({
+  style,
+  selected,
+  onToggle,
+}: {
+  style: (typeof STEP1_STYLE_OPTIONS)[number];
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [hovered, setHovered] = useState(false);
+  const [tooltipPos, setTooltipPos] = useState<{ top: number; left: number } | null>(null);
+
+  const showTooltip = () => {
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const centerX = rect.left + rect.width / 2;
+    const pad = 12;
+    const half = Math.min(170, (window.innerWidth - pad * 2) / 2);
+    const left = Math.min(Math.max(centerX, pad + half), window.innerWidth - pad - half);
+    setTooltipPos({ top: rect.bottom + 6, left });
+    setHovered(true);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        ref={btnRef}
+        type="button"
+        role="option"
+        aria-selected={selected}
+        className={`flex w-full items-center justify-between rounded-xl border border-transparent bg-white px-3 py-2 text-left text-sm shadow-sm transition-all duration-200 ease-out hover:-translate-y-1.5 hover:scale-[1.02] hover:shadow-lg ${
+          selected ? "border-amber-300 bg-amber-50 font-semibold text-amber-900" : "text-[#363028]"
+        }`}
+        onClick={onToggle}
+        onMouseEnter={showTooltip}
+        onMouseLeave={() => setHovered(false)}
+        onFocus={showTooltip}
+        onBlur={() => setHovered(false)}
+      >
+        <span>{style.label}</span>
+        <span className="text-[11px] opacity-60">{style.labelEn}</span>
+        {selected ? <span className="text-amber-700">{"\u2713"}</span> : null}
+      </button>
+      {hovered && tooltipPos
+        ? createPortal(
+            <div
+              className="pointer-events-none fixed z-[200] w-[min(340px,calc(100vw-24px))] -translate-x-1/2 whitespace-normal rounded-xl bg-white p-3 text-xs text-gray-700 shadow-xl ring-1 ring-gray-200"
+              style={{ top: tooltipPos.top, left: tooltipPos.left }}
+              role="tooltip"
+            >
+              <p className="text-[11px] leading-relaxed text-gray-600">{style.desc}</p>
+            </div>,
+            document.body
+          )
+        : null}
+    </div>
+  );
+}
+
+/** 风格选择器：`public/icons/step1-style-wand.png` */
 function IconStyleHat({ className }: { className?: string }) {
   return (
-    <svg
+    <img
+      src="/icons/step1-style-wand.png"
+      alt=""
       width={18}
       height={18}
-      viewBox="0 0 384 512"
-      fill="currentColor"
-      className={["pointer-events-none shrink-0 select-none", className].filter(Boolean).join(" ")}
+      decoding="async"
+      draggable={false}
+      className={[
+        "pointer-events-none h-[18px] w-[18px] shrink-0 object-contain select-none brightness-0",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
       aria-hidden
-    >
-      <path d="M360 448H24c-13.25 0-24 10.75-24 24s10.75 24 24 24h336c13.25 0 24-10.75 24-24s-10.75-24-24-24zm16-144c-22.88 0-43.88 2.625-64 7.625V288c0-31.38-9.75-60.75-26.12-86.25l46.5-58.12C334.8 139.5 336 133.8 336 128c0-17.62-14.38-32-32-32h-74.75l35.25-29.5C273.8 58.38 277.3 43.5 273.5 30.25c-3.75-13.25-16.88-21.88-30.25-18.12-47.5 13.25-91.25 34.25-127.5 61.12L82.63 96H48c-17.62 0-32 14.38-32 32 0 5.75 1.25 11.5 3.625 16.62l46.5 58.12C50.5 227.3 40.75 256.6 40.75 288v123.6C20.63 416.6 0 430.1 0 448c0 17.62 14.38 32 32 32h320c17.62 0 32-14.38 32-32 0-17.88-20.75-31.38-48-32zM288 288v44.1C247.3 313.8 204.5 304 160 304c-43.38 0-86.63 10.63-128 32.25V288c0-113.8 121.1-207.8 229.1-166.1C286.6 149.9 288 168.8 288 188v100z"/>
-      <path d="M336 320c0-12.9-1.7-25.2-4.6-37.1-1.7 12.3-2.9 24.8-3.4 37.1 2.5 0 5-.2 7.6-.2.1 0 .1 0 0 0zM304 188c0-8.2-.4-16.3-1.3-24.2 21.5 20.3 33.3 47.8 33.3 76.2v22.6c5.1-19 8-39.2 8-60.2 0-5.8-.3-11.5-.9-17.1-3.7-34.2-19.1-65.7-42.5-90.8 1.7 8.6 2.6 17.5 2.6 26.6 0 22.9-6 45.1-16.9 64.8 10.1-15.9 16-34.5 16-54.3 0-11.8-1.7-23.2-4.8-34 11.3 14.1 18.3 31.6 18.3 50.8 0 10.7-1.6 21-4.5 30.7 8.7-13.8 13.8-30.1 13.8-47.5 0-12-2.1-23.5-5.8-34.1 7.5 9.8 12 21.6 12 34.1 0 11.3-2.7 22-7.4 31.5"/>
-    </svg>
+    />
+  );
+}
+
+/** 预设管理：`public/icons/step1-preset.png` */
+function IconStep1Preset({ className }: { className?: string }) {
+  return (
+    <img
+      src="/icons/step1-preset.png"
+      alt=""
+      width={18}
+      height={18}
+      decoding="async"
+      draggable={false}
+      className={[
+        "pointer-events-none h-[18px] w-[18px] shrink-0 object-contain select-none brightness-0",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      aria-hidden
+    />
+  );
+}
+
+/** 预设骰子：`public/icons/step1-dice.png` */
+function IconStep1Dice({ className }: { className?: string }) {
+  return (
+    <img
+      src="/icons/step1-dice.png"
+      alt=""
+      width={18}
+      height={18}
+      decoding="async"
+      draggable={false}
+      className={[
+        "pointer-events-none h-[18px] w-[18px] shrink-0 object-contain select-none brightness-0",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      aria-hidden
+    />
   );
 }
 
@@ -258,6 +369,26 @@ export default function Step1Input() {
   const [step1TimerTick, setStep1TimerTick] = useState(0);
   const [isExpandingPrompt, setIsExpandingPrompt] = useState(false);
   const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
+  const [presets, setPresets] = useState<Step1Preset[]>([]);
+  const [activePresetId, setActivePresetId] = useState<string | null>(null);
+  const [presetWizardOpen, setPresetWizardOpen] = useState(false);
+  const [presetWizardMode, setPresetWizardMode] = useState<"create" | "edit">("create");
+  const [presetWizardInitial, setPresetWizardInitial] = useState<Step1Preset | null>(null);
+  const [presetDeleteTarget, setPresetDeleteTarget] = useState<Step1Preset | null>(null);
+
+  useEffect(() => {
+    setPresets(loadStep1Presets());
+    setActivePresetId(loadActivePresetId());
+  }, []);
+
+  useEffect(() => {
+    saveActivePresetId(activePresetId);
+  }, [activePresetId]);
+
+  const activePreset = useMemo(
+    () => presets.find((p) => p.id === activePresetId) ?? null,
+    [presets, activePresetId]
+  );
 
   useEffect(() => {
     // 灯泡改为「即时扩写」后，避免遗留 strong 状态导致生成时重复扩写。
@@ -293,7 +424,7 @@ export default function Step1Input() {
         headers: withDesktopLocalHeader({ "Content-Type": "application/json" }),
         body: JSON.stringify({ 
           prompt: rawPrompt,
-          selectedStyles: selectedStyles.map(id => STYLE_OPTIONS.find(s => s.id === id)?.label || id).filter(Boolean),
+          selectedStyles: selectedStyles.map(id => STEP1_STYLE_OPTIONS.find(s => s.id === id)?.label || id).filter(Boolean),
         }),
       });
       if (!res.ok) {
@@ -322,6 +453,7 @@ export default function Step1Input() {
     setPrompt,
     setStep1ExpansionStrength,
     syncPromptTextareaHeight,
+    selectedStyles,
   ]);
 
   useLayoutEffect(() => {
@@ -400,7 +532,7 @@ export default function Step1Input() {
   const applyStylesToPrompt = () => {
     if (selectedStyles.length === 0) return;
     const styleLabels = selectedStyles
-      .map((id) => STYLE_OPTIONS.find((s) => s.id === id)?.label || id)
+      .map((id) => STEP1_STYLE_OPTIONS.find((s) => s.id === id)?.label || id)
       .join(" + ");
     
     const currentPrompt = prompt.trim();
@@ -415,6 +547,70 @@ export default function Step1Input() {
     setSelectedStyles([]);
     setToolbarMenuOpen(null);
     requestAnimationFrame(() => syncPromptTextareaHeight());
+  };
+
+  const persistPresets = (next: Step1Preset[]) => {
+    setPresets(next);
+    saveStep1Presets(next);
+  };
+
+  const handlePresetWizardSave = (payload: Step1PresetWizardSavePayload) => {
+    const now = new Date().toISOString();
+    if (payload.id) {
+      const next = presets.map((p) =>
+        p.id === payload.id
+          ? {
+              ...p,
+              name: payload.name || defaultPresetName(payload.elements, payload.designObject),
+              elements: payload.elements,
+              styleIds: payload.styleIds,
+              designObject: payload.designObject,
+              material: payload.material,
+              diceStrength: payload.diceStrength,
+              updatedAt: now,
+            }
+          : p
+      );
+      persistPresets(next);
+      emitToast({ type: "success", message: "预设已更新。" });
+      return;
+    }
+    const created: Step1Preset = {
+      id: createPresetId(),
+      name: defaultPresetName(payload.elements, payload.designObject),
+      elements: payload.elements,
+      styleIds: payload.styleIds,
+      designObject: payload.designObject,
+      material: payload.material,
+      diceStrength: payload.diceStrength,
+      createdAt: now,
+      updatedAt: now,
+    };
+    persistPresets([created, ...presets]);
+    emitToast({ type: "success", message: "预设已创建。" });
+  };
+
+  const handleActivatePreset = (preset: Step1Preset) => {
+    setActivePresetId(preset.id);
+    setToolbarMenuOpen(null);
+    emitToast({ type: "success", message: `已激活预设「${preset.name}」` });
+  };
+
+  const handleDeletePresetConfirm = () => {
+    if (!presetDeleteTarget) return;
+    const id = presetDeleteTarget.id;
+    persistPresets(presets.filter((p) => p.id !== id));
+    if (activePresetId === id) setActivePresetId(null);
+    setPresetDeleteTarget(null);
+    emitToast({ type: "info", message: "预设已删除。" });
+  };
+
+  const handleDiceRoll = () => {
+    if (!activePreset || isGenerating) return;
+    const text = buildDicePrompt(activePreset);
+    setPrompt(text);
+    requestAnimationFrame(() => syncPromptTextareaHeight());
+    emitToast({ type: "success", message: "已根据预设随机生成提示词。" });
   };
 
   const appendReferenceFromFile = async (file: File, source: "file" | "paste" | "drop") => {
@@ -932,38 +1128,16 @@ export default function Step1Input() {
                 <div
                   role="listbox"
                   aria-label="选择风格参考"
-                  className={`${STEP1_MODEL_MENU_PANEL} w-[460px] grid grid-cols-2 gap-1 p-2`}
+                  className={`${STEP1_STYLE_MENU_PANEL} w-[460px] grid grid-cols-2 gap-1 p-2`}
                   onMouseDown={(e) => e.stopPropagation()}
                 >
-                  {STYLE_OPTIONS.map((style, index) => (
-                    <div
+                  {STEP1_STYLE_OPTIONS.map((style) => (
+                    <Step1StyleMenuOption
                       key={style.id}
-                      className="group relative"
-                      style={{
-                        zIndex: 50 - index,
-                      }}
-                    >
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={selectedStyles.includes(style.id)}
-                        className={`flex w-full items-center justify-between rounded-xl border border-transparent bg-white px-3 py-2 text-left text-sm shadow-sm transition-all duration-200 ease-out group-hover:-translate-y-1.5 group-hover:scale-[1.02] group-hover:shadow-lg ${
-                          selectedStyles.includes(style.id)
-                            ? "border-amber-300 bg-amber-50 font-semibold text-amber-900"
-                            : "text-[#363028]"
-                        }`}
-                        onClick={() => toggleStyle(style.id)}
-                      >
-                        <span>{style.label}</span>
-                        <span className="text-[11px] opacity-60">{style.labelEn}</span>
-                        {selectedStyles.includes(style.id) ? (
-                          <span className="text-amber-700">✓</span>
-                        ) : null}
-                      </button>
-                      <div className="pointer-events-none absolute -bottom-2 left-1/2 z-[80] hidden w-[340px] -translate-x-1/2 translate-y-full whitespace-normal rounded-xl bg-white p-3 text-xs text-gray-700 shadow-xl ring-1 ring-gray-200 group-hover:block">
-                        <div className="text-[11px] leading-relaxed text-gray-600">{style.desc}</div>
-                      </div>
-                    </div>
+                      style={style}
+                      selected={selectedStyles.includes(style.id)}
+                      onToggle={() => toggleStyle(style.id)}
+                    />
                   ))}
                   <div className="col-span-2 border-t border-gray-200 px-3 py-2 mt-1">
                     <button
@@ -979,7 +1153,65 @@ export default function Step1Input() {
               ) : null}
             </div>
 
-            {step1ReferenceImageDataUrls.length > 0 ? (
+            <div className="relative flex items-center gap-2">
+              <button
+                type="button"
+                disabled={isGenerating}
+                aria-haspopup="listbox"
+                aria-expanded={toolbarMenuOpen === "preset"}
+                aria-pressed={!!activePresetId}
+                aria-label="预设管理"
+                title="管理预设方案：激活、新建、修改或删除"
+                className={step1CircleBtnClass(!!activePresetId, isGenerating)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setToolbarMenuOpen((m) => (m === "preset" ? null : "preset"));
+                }}
+              >
+                <IconStep1Preset className="shrink-0" />
+              </button>
+              {toolbarMenuOpen === "preset" && !isGenerating ? (
+                <Step1PresetMenu
+                  presets={presets}
+                  activePresetId={activePresetId}
+                  onActivate={handleActivatePreset}
+                  onEdit={(p) => {
+                    setPresetWizardMode("edit");
+                    setPresetWizardInitial(p);
+                    setPresetWizardOpen(true);
+                    setToolbarMenuOpen(null);
+                  }}
+                  onDeleteRequest={setPresetDeleteTarget}
+                  onCreateNew={() => {
+                    setPresetWizardMode("create");
+                    setPresetWizardInitial(null);
+                    setPresetWizardOpen(true);
+                    setToolbarMenuOpen(null);
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                />
+              ) : null}
+
+              <button
+                type="button"
+                disabled={isGenerating || !activePreset}
+                aria-label="灵感骰子"
+                title={
+                  activePreset
+                    ? "根据当前激活预设随机组合元素与风格"
+                    : "请先激活一个预设方案"
+                }
+                className={step1CircleBtnClass(!!activePreset, isGenerating || !activePreset)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDiceRoll();
+                }}
+              >
+                <IconStep1Dice className="shrink-0" />
+              </button>
+            </div>
+
+                        {step1ReferenceImageDataUrls.length > 0 ? (
               <button
                 type="button"
                 disabled={isGenerating}
@@ -1034,7 +1266,59 @@ export default function Step1Input() {
         </div>
       </div>
 
-      {error ? <div className="text-sm text-red-600">{error}</div> : null}
+      <Step1PresetWizard
+        open={presetWizardOpen}
+        mode={presetWizardMode}
+        initial={presetWizardInitial}
+        onClose={() => setPresetWizardOpen(false)}
+        onSave={handlePresetWizardSave}
+      />
+
+      {presetDeleteTarget ? (
+        <div
+          className="fixed inset-0 z-[85] flex items-center justify-center bg-black/40 p-4"
+          role="presentation"
+          onClick={() => setPresetDeleteTarget(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="preset-delete-title"
+            className="w-full max-w-sm rounded-2xl border border-[rgba(94,111,130,0.18)] bg-[var(--create-surface-paper)] p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="preset-delete-title" className="text-sm font-semibold text-gray-900">
+              删除预设方案
+            </h3>
+            <p className="mt-2 text-sm text-gray-600">
+              确定删除「<span className="font-medium text-gray-900">{presetDeleteTarget.name}</span>
+              」？此操作不可恢复。
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <BrandButton
+                type="button"
+                variant="outline"
+                shape="full"
+                onClick={() => setPresetDeleteTarget(null)}
+                className="h-[34px] px-4 text-sm"
+              >
+                取消
+              </BrandButton>
+              <BrandButton
+                type="button"
+                variant="danger"
+                shape="full"
+                onClick={handleDeletePresetConfirm}
+                className="h-[34px] px-4 text-sm"
+              >
+                确认删除
+              </BrandButton>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+            {error ? <div className="text-sm text-red-600">{error}</div> : null}
     </div>
   );
 }

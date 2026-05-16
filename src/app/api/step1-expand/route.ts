@@ -12,17 +12,17 @@ type Body = {
 };
 
 export async function POST(req: Request) {
-  const authz = await requireApiActiveUser(req);
-  if (!authz.ok) return authz.response;
-
-  const body = (await req.json().catch(() => ({}))) as Partial<Body>;
-  const prompt = typeof body.prompt === "string" ? body.prompt : "";
-  const selectedStyles = Array.isArray(body.selectedStyles) ? body.selectedStyles.filter(Boolean) : [];
-  if (!prompt.trim()) {
-    return NextResponse.json({ message: "缺少 prompt" }, { status: 400 });
-  }
-
   try {
+    const authz = await requireApiActiveUser(req);
+    if (!authz.ok) return authz.response;
+
+    const body = (await req.json().catch(() => ({}))) as Partial<Body>;
+    const prompt = typeof body.prompt === "string" ? body.prompt : "";
+    const selectedStyles = Array.isArray(body.selectedStyles) ? body.selectedStyles.filter(Boolean) : [];
+    if (!prompt.trim()) {
+      return NextResponse.json({ message: "缺少 prompt" }, { status: 400 });
+    }
+
     const kind = inferJewelryProductKind(prompt);
     const result = await expandStep1PromptWithAi({ prompt, kind, selectedStyles });
     return NextResponse.json({
@@ -32,6 +32,7 @@ export async function POST(req: Request) {
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Step1 改写失败";
+    console.error("[step1-expand]", e);
     return NextResponse.json({ message }, { status: 500 });
   }
 }
