@@ -125,6 +125,51 @@ export function formatElementPool(elements: string[]): string {
   return elements.map(normalizeElementPoolToken).filter(Boolean).join(",");
 }
 
+export type ElementPoolTextSpan = { start: number; end: number };
+
+/** 在元素池原文中查找所有匹配（优先完整元素名，否则按子串） */
+export function findElementPoolSearchMatches(
+  raw: string,
+  elements: string[],
+  query: string,
+): ElementPoolTextSpan[] {
+  const q = query.trim();
+  if (!q || !raw) return [];
+
+  const spans: ElementPoolTextSpan[] = [];
+  const matchedElements = elements.filter((el) => el.includes(q));
+  if (matchedElements.length > 0) {
+    const seen = new Set<string>();
+    for (const el of matchedElements) {
+      if (seen.has(el)) continue;
+      seen.add(el);
+      let from = 0;
+      while (from < raw.length) {
+        const idx = raw.indexOf(el, from);
+        if (idx === -1) break;
+        spans.push({ start: idx, end: idx + el.length });
+        from = idx + el.length;
+      }
+    }
+  } else {
+    let from = 0;
+    while (from < raw.length) {
+      const idx = raw.indexOf(q, from);
+      if (idx === -1) break;
+      spans.push({ start: idx, end: idx + q.length });
+      from = idx + q.length;
+    }
+  }
+
+  spans.sort((a, b) => a.start - b.start);
+  const deduped: ElementPoolTextSpan[] = [];
+  for (const s of spans) {
+    if (deduped.some((d) => d.start === s.start && d.end === s.end)) continue;
+    deduped.push(s);
+  }
+  return deduped;
+}
+
 function pickRandomUnique<T>(pool: T[], count: number): T[] {
   if (!pool.length || count <= 0) return [];
   const n = Math.min(count, pool.length);

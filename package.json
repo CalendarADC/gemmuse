@@ -1,6 +1,6 @@
 {
   "name": "gemmuse",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "description": "GemMuse desktop and web jewelry AI generator",
   "author": "Ryan 丁",
   "private": true,
@@ -54,7 +54,7 @@
   },
   "build": {
     "appId": "com.gemmuse.desktop",
-    "productName": "GemMuse 2.6.0",
+    "productName": "GemMuse 2.6.1",
     "copyright": "Copyright © Ryan 丁",
     "executableName": "GemMuseDesktop",
     "artifactName": "${productName}-${version}-${arch}.${ext}",

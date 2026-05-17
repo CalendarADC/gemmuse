@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildDicePrompt,
+  findElementPoolSearchMatches,
   formatElementPool,
   mergeImportedStep1Presets,
   normalizeElementPoolToken,
@@ -74,6 +75,23 @@ const samplePreset = (): Step1Preset => ({
   diceStrength: "single_element_single_style",
   createdAt: "",
   updatedAt: "",
+});
+
+describe("findElementPoolSearchMatches", () => {
+  it("finds spans for elements containing query", () => {
+    const raw = "卢恩符文+渡鸦羽翼,小鸟,卢恩符文+狼首";
+    const elements = parseElementPoolInput(raw);
+    const matches = findElementPoolSearchMatches(raw, elements, "卢恩符文");
+    expect(matches.length).toBeGreaterThanOrEqual(2);
+    expect(raw.slice(matches[0]!.start, matches[0]!.end)).toContain("卢恩符文");
+  });
+
+  it("falls back to substring when no element contains query", () => {
+    const raw = "abc,def";
+    const elements = parseElementPoolInput(raw);
+    const matches = findElementPoolSearchMatches(raw, elements, "c,d");
+    expect(matches).toEqual([{ start: 2, end: 5 }]);
+  });
 });
 
 describe("step1 presets import/export", () => {

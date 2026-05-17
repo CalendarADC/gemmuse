@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import BrandButton from "./BrandButton";
 import {
@@ -11,6 +11,7 @@ import {
   type Step1DesignObject,
   type Step1Material,
   type Step1Preset,
+  findElementPoolSearchMatches,
   formatElementPool,
   parseElementPoolInput,
 } from "@/lib/step1/step1Presets";
@@ -39,6 +40,7 @@ const WIZARD_STEPS = ["元素池", "风格", "设计对象", "材质", "骰子�
 export default function Step1PresetWizard({ open, mode, initial, onClose, onSave }: Step1PresetWizardProps) {
   const [step, setStep] = useState(0);
   const [elementRaw, setElementRaw] = useState("");
+  const elementTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [styleIds, setStyleIds] = useState<string[]>([]);
   const [designObject, setDesignObject] = useState<Step1DesignObject>("ring");
   const [materials, setMaterials] = useState<Step1Material[]>(["s925"]);
@@ -122,9 +124,18 @@ export default function Step1PresetWizard({ open, mode, initial, onClose, onSave
         aria-modal="true"
         aria-labelledby="preset-wizard-title"
       >
-        <h2 id="preset-wizard-title" className="mb-4 text-base font-semibold text-gray-900">
-          {mode === "edit" ? "修改预设" : "新建预设"}
-        </h2>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <h2 id="preset-wizard-title" className="shrink-0 text-base font-semibold text-gray-900">
+            {mode === "edit" ? "修改预设" : "新建预设"}
+          </h2>
+          {step === 0 ? (
+            <ElementPoolSearchBar
+              elementRaw={elementRaw}
+              elements={elements}
+              textareaRef={elementTextareaRef}
+            />
+          ) : null}
+        </div>
 
         <div className="mb-4 flex flex-wrap gap-1">
           {WIZARD_STEPS.map((label, i) => (
@@ -146,6 +157,7 @@ export default function Step1PresetWizard({ open, mode, initial, onClose, onSave
               多个独立元素用逗号分隔；同一组合主题内的子元素用 + 连接（仍算 1 个元素）。
             </p>
             <textarea
+              ref={elementTextareaRef}
               className="min-h-[120px] w-full rounded-xl border border-[rgba(94,111,130,0.2)] p-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               value={elementRaw}
               onChange={(e) => setElementRaw(e.target.value)}
@@ -292,6 +304,117 @@ export default function Step1PresetWizard({ open, mode, initial, onClose, onSave
         </div>
       </div>
     </PresetWizardOverlay>
+  );
+}
+
+function ElementPoolSearchBar({
+  elementRaw,
+  elements,
+  textareaRef,
+}: {
+  elementRaw: string;
+  elements: string[];
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+}) {
+  const [query, setQuery] = useState("");
+  const [matchIndex, setMatchIndex] = useState(0);
+
+  const matches = useMemo(
+    () => findElementPoolSearchMatches(elementRaw, elements, query),
+    [elementRaw, elements, query],
+  );
+
+  useEffect(() => {
+    setMatchIndex(0);
+  }, [query, elementRaw]);
+
+  const focusMatchAt = useCallback(
+    (index: number) => {
+      const span = matches[index];
+      const ta = textareaRef.current;
+      if (!span || !ta) return;
+      ta.focus();
+      ta.setSelectionRange(span.start, span.end);
+      const lineHeight = parseInt(getComputedStyle(ta).lineHeight, 10) || 20;
+      const before = elementRaw.slice(0, span.start);
+      const line = (before.match(/\n/g) ?? []).length;
+      ta.scrollTop = Math.max(0, line * lineHeight - ta.clientHeight / 3);
+    },
+    [matches, textareaRef, elementRaw],
+  );
+
+  const goToMatch = useCallback(
+    (index: number) => {
+      if (!matches.length) return;
+      const next = ((index % matches.length) + matches.length) % matches.length;
+      setMatchIndex(next);
+      focusMatchAt(next);
+    },
+    [matches, focusMatchAt],
+  );
+
+  const onSearch = () => {
+    if (!matches.length) return;
+    goToMatch(0);
+  };
+
+  const onNext = () => {
+    if (!matches.length) return;
+    goToMatch(matchIndex + 1);
+  };
+
+  const hasQuery = query.trim().length > 0;
+  const statusText = !hasQuery
+    ? ""
+    : matches.length === 0
+      ? "无匹配"
+      : `${Math.min(matchIndex + 1, matches.length)}/${matches.length}`;
+
+  return (
+    <div className="flex min-w-0 max-w-[min(100%,240px)] flex-col items-end gap-1">
+      <div className="flex w-full items-center gap-1">
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (e.shiftKey) onNext();
+              else onSearch();
+            }
+          }}
+          placeholder="搜索元素"
+          aria-label="在元素池中搜索元素"
+          className="min-w-0 flex-1 rounded-lg border border-[rgba(94,111,130,0.25)] px-2 py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+        />
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={matches.length === 0}
+          title={
+            matches.length === 0
+              ? "无匹配结果"
+              : matches.length === 1
+                ? "仅一处匹配"
+                : "跳转到下一处（Enter 定位首条，Shift+Enter 下一个）"
+          }
+          className="shrink-0 rounded-lg border border-[rgba(94,111,130,0.2)] bg-white px-2 py-1 text-xs font-medium text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          下一个
+        </button>
+      </div>
+      {hasQuery ? (
+        <span
+          className={[
+            "text-[10px]",
+            matches.length === 0 ? "text-red-600" : "text-gray-500",
+          ].join(" ")}
+        >
+          {statusText}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
